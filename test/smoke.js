@@ -35,7 +35,7 @@ function client() {
   let r = await admin('/auth/register', { username: 'boss', email: 'boss@example.com', password: 'password123', terms: true });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.user.role, 'admin', 'first real user becomes admin');
-  assert.equal(r.data.user.balance, 250);
+  assert.equal(r.data.user.balance, 25, 'signup bonus is $0.25');
   const refCode = r.data.user.referral_code;
 
   r = await user('/auth/register', { username: 'player1', email: 'p1@example.com', password: 'password123', terms: true, referral: refCode });
@@ -52,13 +52,13 @@ function client() {
   r = await user(`/offers/${offer.id}/complete`, {});
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.status, 'completed');
-  assert.equal(r.data.user.balance, 250 + offer.payout);
+  assert.equal(r.data.user.balance, 25 + offer.payout);
 
   r = await user(`/offers/${offer.id}/complete`, {});
   assert.equal(r.status, 400, 'non-repeatable offer cannot be completed twice');
 
   r = await admin('/me');
-  assert.equal(r.data.user.balance, 250 + Math.floor(offer.payout * 0.1), 'referrer got 10% commission');
+  assert.equal(r.data.user.balance, 25 + Math.floor(offer.payout * 0.1), 'referrer got 10% commission');
 
   r = await user('/daily', {});
   assert.equal(r.status, 200);
@@ -73,18 +73,27 @@ function client() {
   r = await user('/me');
   const before = r.data.user.balance;
   const { data: { methods } } = await user('/reward-methods');
-  const paypal = methods.find((m) => m.name === 'PayPal');
-  r = await user('/withdraw', { method_id: paypal.id, coins: 1000, destination: 'p1@example.com' });
+  assert.ok(!methods.some((m) => m.name === 'PayPal'), 'no PayPal');
+  assert.deepEqual([...new Set(methods.map((m) => m.category))].sort(), ['crypto', 'giftcard', 'prepaid']);
+  const btc = methods.find((m) => m.name === 'Bitcoin');
+  const visa = methods.find((m) => m.name === 'Visa Prepaid');
+  const walmart = methods.find((m) => m.name === 'Walmart');
+  assert.equal(visa.min_coins, 2000, 'prepaid minimum is $20');
+  assert.equal(walmart.min_coins, 500, 'gift card minimum is $5');
+  r = await user('/withdraw', { method_id: btc.id, coins: 499, destination: 'bc1qexample' });
+  assert.equal(r.status, 400, 'below minimum rejected');
+  r = await user('/withdraw', { method_id: btc.id, coins: 500, destination: 'bc1qexample' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.user.balance, before - 1000);
-  r = await user('/withdraw', { method_id: paypal.id, coins: 99999999, destination: 'p1@example.com' });
-  assert.equal(r.status, 400);
+  assert.equal(r.data.user.balance, before - 500);
+  r = await user('/withdraw', { method_id: btc.id, coins: 900000, destination: 'bc1qexample' });
+  assert.equal(r.status, 400, 'insufficient balance rejected');
 
   r = await user('/admin/overview');
   assert.equal(r.status, 403, 'non-admin blocked from admin API');
 
   r = await admin('/admin/withdrawals?status=pending');
   assert.equal(r.data.withdrawals.length, 1);
+  assert.equal(r.data.withdrawals[0].usd, 5, 'usd recorded');
   r = await admin(`/admin/withdrawals/${r.data.withdrawals[0].id}/reject`, { note: 'test' });
   assert.equal(r.status, 200);
   r = await user('/me');

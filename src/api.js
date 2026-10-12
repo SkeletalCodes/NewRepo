@@ -41,14 +41,13 @@ function maskName(name) {
 
 router.get('/config', async (req, res) => {
   const s = await getSettings();
+  const min = await db.get('SELECT MIN(min_coins) AS n FROM reward_methods WHERE active = 1');
   res.json({
     site_name: s.site_name,
-    currency_name: s.currency_name,
-    coins_per_usd: Number(s.coins_per_usd),
     signup_bonus: Number(s.signup_bonus),
     daily_reward: Number(s.daily_reward),
     referral_percent: Number(s.referral_percent),
-    min_withdraw: Number(s.min_withdraw),
+    min_withdraw: (min && min.n) || 500,
     announcement: s.announcement,
     maintenance: s.maintenance === '1',
     ephemeral: EPHEMERAL,
@@ -199,7 +198,7 @@ router.post('/offers/:id/complete', requireUser, actionLimiter, async (req, res)
       }
       const now = Date.now();
       const completion = await t.get(`INSERT INTO offer_completions (user_id, offer_id, offer_title, provider, reward, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING *`, req.user.id, offer.id, offer.title, offer.provider || 'GemRush', payout, now, now);
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING *`, req.user.id, offer.id, offer.title, offer.provider || 'Featured', payout, now, now);
       if (auto) await approveCompletionInTx(t, completion);
       return { status: auto ? 'completed' : 'pending', reward: payout };
     });
@@ -261,16 +260,15 @@ router.post('/withdraw', requireUser, actionLimiter, async (req, res) => {
   if (!method) return bad(res, 'Choose a valid reward method.');
   const coins = Math.floor(Number(req.body.coins));
   const destination = String(req.body.destination || '').trim();
-  const min = Math.max(Number(await getSetting('min_withdraw')) || 0, method.min_coins);
-  if (!Number.isFinite(coins) || coins < min) return bad(res, `Minimum cashout for ${method.name} is ${min.toLocaleString()} gems.`);
-  if (coins > 10_000_000) return bad(res, 'Amount too large.');
+  const min = method.min_coins;
+  if (!Number.isFinite(coins) || coins < min) return bad(res, `Minimum cashout for ${method.name} is $${(min / 100).toFixed(2)}.`);
+  if (coins > 1_000_000) return bad(res, 'Amount too large.');
   if (!destination || destination.length > 200) return bad(res, `Enter your ${method.field_label}.`);
-  const perUsd = Number(await getSetting('coins_per_usd')) || 1000;
 
   const ok = await db.tx(async (t) => {
     if (!(await debit(t, req.user.id, coins, 'withdraw', `Cashout via ${method.name}`))) return false;
     await t.run(`INSERT INTO withdrawals (user_id, method_id, method_name, coins, usd, destination, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`, req.user.id, method.id, method.name, coins, Math.round((coins / perUsd) * 100) / 100, destination, Date.now());
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, req.user.id, method.id, method.name, coins, coins / 100, destination, Date.now());
     return true;
   });
   if (!ok) return bad(res, 'Insufficient balance.');

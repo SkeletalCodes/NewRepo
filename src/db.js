@@ -153,7 +153,7 @@ const SCHEMA = [
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     offer_id INTEGER REFERENCES offers(id) ON DELETE SET NULL,
     offer_title TEXT NOT NULL,
-    provider TEXT NOT NULL DEFAULT 'GemRush',
+    provider TEXT NOT NULL DEFAULT 'Featured',
     reward INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     txid TEXT UNIQUE,
@@ -219,16 +219,14 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS idx_wd_status ON withdrawals(status)',
 ];
 
+// Money settings are in US cents.
 const DEFAULT_SETTINGS = {
-  site_name: 'GemRush',
-  currency_name: 'Gems',
-  coins_per_usd: '1000',
-  signup_bonus: '250',
-  daily_reward: '50',
+  site_name: 'GoldRush',
+  signup_bonus: '25',
+  daily_reward: '5',
   referral_percent: '10',
-  min_withdraw: '1000',
   auto_approve_offers: '1',
-  announcement: 'Welcome to GemRush! Use code WELCOME for 100 free gems.',
+  announcement: 'New here? Use code WELCOME for a free bonus.',
   maintenance: '0',
 };
 

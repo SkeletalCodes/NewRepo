@@ -118,7 +118,7 @@ function offerFields(b) {
     offerwall_id: b.offerwall_id ? int(b.offerwall_id) : null,
     category: ['game', 'app', 'survey', 'signup', 'shopping', 'video'].includes(b.category) ? b.category : 'game',
     reward: Math.min(100_000_000, Math.max(1, int(b.reward, 100))),
-    icon: str(b.icon, 8) || '🎮',
+    icon: str(b.icon, 200) || 'fa-gamepad',
     color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#7c5cff',
     device: ['all', 'android', 'ios', 'desktop'].includes(b.device) ? b.device : 'all',
     est_minutes: Math.min(1_000_000, Math.max(1, int(b.est_minutes, 10))),
@@ -164,7 +164,7 @@ function wallFields(b) {
     slug: (str(b.slug, 60) || name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
     tagline: str(b.tagline, 120),
     color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#7c5cff',
-    icon: str(b.icon, 8) || '💎',
+    icon: str(b.icon, 200) || 'fa-layer-group',
     bonus_percent: Math.min(1000, Math.max(0, int(b.bonus_percent))),
     active: 'active' in b ? bool(b.active) : 1,
     sort: int(b.sort),
@@ -256,8 +256,8 @@ router.post('/withdrawals/:id/:action', async (req, res) => {
 function methodFields(b) {
   return {
     name: str(b.name, 60),
-    category: ['cash', 'crypto', 'giftcard', 'gaming'].includes(b.category) ? b.category : 'cash',
-    icon: str(b.icon, 8) || '💵',
+    category: ['crypto', 'prepaid', 'giftcard'].includes(b.category) ? b.category : 'crypto',
+    icon: str(b.icon, 200) || 'fa-money-bill',
     color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#22c55e',
     field_label: str(b.field_label, 60) || 'Email',
     min_coins: Math.min(100_000_000, Math.max(1, int(b.min_coins, 1000))),
@@ -301,7 +301,7 @@ router.post('/promos', async (req, res) => {
   const code = str(req.body.code, 32).toUpperCase();
   if (!/^[A-Z0-9_-]{3,32}$/.test(code)) return bad(res, 'Code must be 3-32 letters, numbers, - or _.');
   const reward = int(req.body.reward);
-  if (reward < 1 || reward > 100_000_000) return bad(res, 'Reward must be between 1 and 100,000,000.');
+  if (reward < 1 || reward > 1_000_000) return bad(res, 'Reward must be between $0.01 and $10,000.');
   const days = int(req.body.expires_days);
   const r = await db.run('INSERT INTO promo_codes (code, reward, max_uses, expires_at, active, created_at) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT (code) DO NOTHING',
     code, reward, Math.max(0, int(req.body.max_uses)), days > 0 ? Date.now() + days * DAY_MS : null, Date.now());
@@ -330,9 +330,9 @@ router.get('/transactions', async (_req, res) => {
 
 /* -------------------------------------------------------------- settings */
 
-const EDITABLE = ['site_name', 'currency_name', 'coins_per_usd', 'signup_bonus', 'daily_reward', 'referral_percent',
-  'min_withdraw', 'auto_approve_offers', 'announcement', 'maintenance', 'postback_secret'];
-const NUMERIC = ['coins_per_usd', 'signup_bonus', 'daily_reward', 'referral_percent', 'min_withdraw'];
+const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent',
+  'auto_approve_offers', 'announcement', 'maintenance', 'postback_secret'];
+const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent'];
 
 router.get('/settings', async (_req, res) => res.json({ settings: await getSettings() }));
 
@@ -342,8 +342,7 @@ router.put('/settings', async (req, res) => {
     if (!(key in req.body)) continue;
     let value = req.body[key];
     if (NUMERIC.includes(key)) {
-      value = Math.min(1_000_000_000, Math.max(0, int(value)));
-      if (key === 'coins_per_usd' && value < 1) return bad(res, 'Gems per $1 must be at least 1.');
+      value = Math.min(key === 'referral_percent' ? 100 : 1_000_000, Math.max(0, int(value)));
     } else if (key === 'auto_approve_offers' || key === 'maintenance') {
       value = bool(value);
     } else {

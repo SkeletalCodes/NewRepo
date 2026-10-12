@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { db, migrate, getSetting, IS_PG, EPHEMERAL } = require('./src/db');
 const { loadUser } = require('./src/auth');
-const { seed, ensureEnvAdmin } = require('./src/seed');
+const { seed, upgrade, ensureEnvAdmin } = require('./src/seed');
 const { approveCompletionInTx, rejectCompletion } = require('./src/rewards');
 
 // Schema + seed run once per process (once per cold start on serverless hosts).
@@ -15,6 +15,7 @@ function init() {
     ready = (async () => {
       await migrate();
       await seed();
+      await upgrade();
       await ensureEnvAdmin();
     })().catch((err) => {
       ready = null; // retry on the next request
@@ -33,7 +34,7 @@ app.use((_req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Content-Security-Policy',
-    "default-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+    "default-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'");
   next();
 });
 

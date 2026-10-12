@@ -1,6 +1,6 @@
-# 💎 GemRush — a get-paid-to (GPT) rewards site
+# GoldRush: a get-paid-to (GPT) rewards site
 
-A complete GPT / offerwall rewards site (similar to Gemsloot, Freecash, etc.): users earn **Gems** by completing offers and cash them out for PayPal, crypto, gift cards and gaming currencies. It ships with an admin panel and demo offers.
+A complete GPT / offerwall rewards site (similar to Gemsloot, Freecash, etc.): users earn **US dollars** by completing offers and cash out in **crypto** (BTC, ETH, LTC, SOL, BNB, TRX, DOGE, from $5), **prepaid cards** (Visa, Mastercard, from $20) or **gift cards** (Amazon, Walmart, Target, Apple, Google Play, Steam, from $5). Minimums can be changed per method in the admin panel. It ships with an admin panel and demo offers.
 
 Built with **Node.js + Express**. It uses **Postgres** when `DATABASE_URL` is set (production, Vercel) and falls back to **SQLite** (Node's built-in `node:sqlite`) for zero-config local development. The front end is a single-page app in vanilla JS and CSS, with no build step.
 
@@ -31,6 +31,12 @@ Run the end-to-end API tests with `npm test` (SQLite), or `DATABASE_URL=postgres
 Without a database the site still runs on Vercel, but it uses temporary storage that Vercel wipes regularly, and each server instance has its own copy. Admins see a yellow warning banner while it's in this mode.
 
 Any other Postgres works too (Supabase, Railway, Render): set `DATABASE_URL` to its connection string.
+
+## Design
+
+Black and gold, with Fredoka One headings and offset "press" cards that flatten on hover. Icons are Font Awesome 6 (free), and the crypto logos come from `cryptocurrency-icons`. Both are bundled in `public/` so nothing loads from an icon CDN. The animations are plain CSS and the Web Animations API: a 3D spinning coin, coins that fly into your balance when you earn, count-up numbers, scroll reveals, a live earnings feed and a drifting cloud header. They're turned off for visitors with reduced motion enabled.
+
+All money is stored as integer **US cents**. A database from the earlier Gems version is converted automatically on first start (1,000 Gems = $1).
 
 ## Features
 
@@ -65,10 +71,10 @@ Before going live, delete or hide the demo offers and connect real offerwalls (s
 
 ## Connecting real offerwalls (postback)
 
-Admin → Settings shows your postback URL:
+Admin → Settings shows your postback URL. `reward` is in **US cents** (250 = $2.50):
 
 ```
-/api/postback?secret=SECRET&user_id={USER_ID}&offer_id={OFFER_ID}&title={OFFER_NAME}&reward={REWARD}&txid={TRANSACTION_ID}&provider=NetworkName&status={STATUS}
+/api/postback?secret=SECRET&user_id={USER_ID}&offer_id={OFFER_ID}&title={OFFER_NAME}&reward={PAYOUT_IN_CENTS}&txid={TRANSACTION_ID}&provider=NetworkName&status={STATUS}
 ```
 
 - `status=1` (or no status) credits the user. A `txid` that was already credited is ignored.
