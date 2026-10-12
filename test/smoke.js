@@ -6,8 +6,8 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemrush-'));
-process.env.DB_PATH = path.join(dir, 'test.db');
-const { app } = require('../server');
+if (!process.env.DATABASE_URL) process.env.DB_PATH = path.join(dir, 'test.db');
+const app = require('../server');
 
 const server = app.listen(0);
 const base = `http://127.0.0.1:${server.address().port}/api`;
@@ -128,8 +128,19 @@ function client() {
   r = await user('/feed');
   assert.ok(r.data.feed.length > 0);
 
-  console.log('All smoke tests passed ✔');
+  // Bodiless DELETE from the admin UI must work.
+  const offers = (await admin('/admin/offers')).data.offers;
+  r = await admin(`/admin/offers/${offers[0].id}`, undefined, 'DELETE');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal((await admin('/admin/offers')).data.offers.length, offers.length - 1);
+
+  // Case-insensitive usernames.
+  r = await client()('/auth/register', { username: 'PLAYER1', email: 'p1b@example.com', password: 'password123', terms: true });
+  assert.equal(r.status, 400);
+
+  console.log(`All smoke tests passed ✔ (${process.env.DATABASE_URL ? 'Postgres' : 'SQLite'})`);
   server.close();
+  if (process.env.DATABASE_URL) process.exit(0); // close the pg pool
   fs.rmSync(dir, { recursive: true, force: true });
 })().catch((err) => {
   console.error(err);

@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { db, tx, credit, getSettings, setSetting } = require('./db');
+const { db, credit, getSettings, setSetting } = require('./db');
 const { requireAdmin, hashPassword } = require('./auth');
 const { approveCompletion, rejectCompletion } = require('./rewards');
 
@@ -13,92 +13,98 @@ const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
 const int = (v, d = 0) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : d);
 const bool = (v) => (v === true || v === 1 || v === '1' || v === 'true' || v === 'on' ? 1 : 0);
 const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
+const isUnique = (err) => /unique|duplicate|constraint/i.test(err.message);
 
 /* -------------------------------------------------------------- overview */
 
-router.get('/overview', (_req, res) => {
-  const one = (sql, ...p) => db.prepare(sql).get(...p).n;
+router.get('/overview', async (_req, res) => {
+  const one = async (sql, ...p) => (await db.get(sql, ...p)).n;
   const now = Date.now();
-  const signups = [];
-  const earnings = [];
+  const days = [];
   for (let i = 13; i >= 0; i--) {
     const start = new Date(now - i * DAY_MS);
     start.setHours(0, 0, 0, 0);
-    const end = start.getTime() + DAY_MS;
-    signups.push({ day: start.getTime(), n: one('SELECT COUNT(*) AS n FROM users WHERE created_at >= ? AND created_at < ?', start.getTime(), end) });
-    earnings.push({ day: start.getTime(), n: one("SELECT COALESCE(SUM(amount),0) AS n FROM transactions WHERE type = 'offer' AND created_at >= ? AND created_at < ?", start.getTime(), end) });
+    days.push(start.getTime());
   }
+  const signups = await Promise.all(days.map(async (d) => ({
+    day: d, n: await one('SELECT COUNT(*) AS n FROM users WHERE created_at >= ? AND created_at < ?', d, d + DAY_MS),
+  })));
+  const earnings = await Promise.all(days.map(async (d) => ({
+    day: d, n: await one("SELECT COALESCE(SUM(amount),0) AS n FROM transactions WHERE type = 'offer' AND created_at >= ? AND created_at < ?", d, d + DAY_MS),
+  })));
   res.json({
-    users: one('SELECT COUNT(*) AS n FROM users'),
-    users_today: one('SELECT COUNT(*) AS n FROM users WHERE created_at > ?', now - DAY_MS),
-    total_balance: one('SELECT COALESCE(SUM(balance),0) AS n FROM users'),
-    offers_completed: one("SELECT COUNT(*) AS n FROM offer_completions WHERE status = 'completed'"),
-    pending_completions: one("SELECT COUNT(*) AS n FROM offer_completions WHERE status = 'pending'"),
-    pending_withdrawals: one("SELECT COUNT(*) AS n FROM withdrawals WHERE status = 'pending'"),
-    pending_withdrawals_usd: one("SELECT COALESCE(SUM(usd),0) AS n FROM withdrawals WHERE status = 'pending'"),
-    paid_usd: one("SELECT COALESCE(SUM(usd),0) AS n FROM withdrawals WHERE status IN ('approved','paid')"),
-    active_offers: one('SELECT COUNT(*) AS n FROM offers WHERE active = 1'),
+    users: await one('SELECT COUNT(*) AS n FROM users'),
+    users_today: await one('SELECT COUNT(*) AS n FROM users WHERE created_at > ?', now - DAY_MS),
+    total_balance: await one('SELECT COALESCE(SUM(balance),0) AS n FROM users'),
+    offers_completed: await one("SELECT COUNT(*) AS n FROM offer_completions WHERE status = 'completed'"),
+    pending_completions: await one("SELECT COUNT(*) AS n FROM offer_completions WHERE status = 'pending'"),
+    pending_withdrawals: await one("SELECT COUNT(*) AS n FROM withdrawals WHERE status = 'pending'"),
+    pending_withdrawals_usd: await one("SELECT COALESCE(SUM(usd),0) AS n FROM withdrawals WHERE status = 'pending'"),
+    paid_usd: await one("SELECT COALESCE(SUM(usd),0) AS n FROM withdrawals WHERE status IN ('approved','paid')"),
+    active_offers: await one('SELECT COUNT(*) AS n FROM offers WHERE active = 1'),
     signups,
     earnings,
-    recent_users: db.prepare('SELECT id, username, email, balance, created_at FROM users ORDER BY id DESC LIMIT 6').all(),
+    recent_users: await db.all('SELECT id, username, email, balance, created_at FROM users ORDER BY id DESC LIMIT 6'),
   });
 });
 
 /* ----------------------------------------------------------------- users */
 
-router.get('/users', (req, res) => {
-  const q = `%${str(req.query.q, 100)}%`;
-  const users = db.prepare(`SELECT u.id, u.username, u.email, u.balance, u.total_earned, u.role, u.banned, u.is_demo,
+router.get('/users', async (req, res) => {
+  const raw = str(req.query.q, 100);
+  const q = `%${raw.toLowerCase()}%`;
+  const users = await db.all(`SELECT u.id, u.username, u.email, u.balance, u.total_earned, u.role, u.banned, u.is_demo,
       u.referral_code, u.created_at, u.last_login_at, r.username AS referred_by_name,
       (SELECT COUNT(*) FROM users x WHERE x.referred_by = u.id) AS referrals
     FROM users u LEFT JOIN users r ON r.id = u.referred_by
-    WHERE u.username LIKE ? OR u.email LIKE ? OR CAST(u.id AS TEXT) = ?
-    ORDER BY u.id DESC LIMIT 200`).all(q, q, str(req.query.q, 100));
+    WHERE lower(u.username) LIKE ? OR lower(u.email) LIKE ? OR CAST(u.id AS TEXT) = ?
+    ORDER BY u.id DESC LIMIT 200`, q, q, raw);
   res.json({ users });
 });
 
-router.get('/users/:id', (req, res) => {
+router.get('/users/:id', async (req, res) => {
   const id = int(req.params.id);
-  const user = db.prepare('SELECT id, username, email, balance, total_earned, role, banned, referral_code, created_at, last_login_at FROM users WHERE id = ?').get(id);
+  const user = await db.get('SELECT id, username, email, balance, total_earned, role, banned, referral_code, created_at, last_login_at FROM users WHERE id = ?', id);
   if (!user) return bad(res, 'User not found.', 404);
   res.json({
     user,
-    transactions: db.prepare('SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 50').all(id),
-    withdrawals: db.prepare('SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 50').all(id),
+    transactions: await db.all('SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 50', id),
+    withdrawals: await db.all('SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 50', id),
   });
 });
 
-router.post('/users/:id/balance', (req, res) => {
+router.post('/users/:id/balance', async (req, res) => {
   const id = int(req.params.id);
   const amount = int(req.body.amount);
   if (!amount) return bad(res, 'Enter a non-zero amount.');
-  if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) return bad(res, 'User not found.', 404);
-  tx(() => credit(id, amount, 'admin', str(req.body.reason, 200) || `Adjusted by ${req.user.username}`));
+  if (Math.abs(amount) > 100_000_000) return bad(res, 'Amount too large.');
+  if (!(await db.get('SELECT 1 AS x FROM users WHERE id = ?', id))) return bad(res, 'User not found.', 404);
+  await db.tx((t) => credit(t, id, amount, 'admin', str(req.body.reason, 200) || `Adjusted by ${req.user.username}`));
   res.json({ ok: true });
 });
 
-router.patch('/users/:id', (req, res) => {
+router.patch('/users/:id', async (req, res) => {
   const id = int(req.params.id);
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  if (!user) return bad(res, 'User not found.', 404);
-  if (id === req.user.id && (req.body.banned || req.body.role === 'user')) return bad(res, "You can't ban or demote yourself.");
-  if ('banned' in req.body) {
-    db.prepare('UPDATE users SET banned = ? WHERE id = ?').run(bool(req.body.banned), id);
-    if (bool(req.body.banned)) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+  const body = req.body || {};
+  if (!(await db.get('SELECT 1 AS x FROM users WHERE id = ?', id))) return bad(res, 'User not found.', 404);
+  if (id === req.user.id && (body.banned || body.role === 'user')) return bad(res, "You can't ban or demote yourself.");
+  if (body.password && String(body.password).length < 8) return bad(res, 'Password must be at least 8 characters.');
+  if ('banned' in body) {
+    await db.run('UPDATE users SET banned = ? WHERE id = ?', bool(body.banned), id);
+    if (bool(body.banned)) await db.run('DELETE FROM sessions WHERE user_id = ?', id);
   }
-  if (req.body.role === 'admin' || req.body.role === 'user') db.prepare('UPDATE users SET role = ? WHERE id = ?').run(req.body.role, id);
-  if (req.body.password) {
-    if (String(req.body.password).length < 8) return bad(res, 'Password must be at least 8 characters.');
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(req.body.password)), id);
-    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+  if (body.role === 'admin' || body.role === 'user') await db.run('UPDATE users SET role = ? WHERE id = ?', body.role, id);
+  if (body.password) {
+    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(String(body.password)), id);
+    await db.run('DELETE FROM sessions WHERE user_id = ?', id);
   }
   res.json({ ok: true });
 });
 
-router.delete('/users/:id', (req, res) => {
+router.delete('/users/:id', async (req, res) => {
   const id = int(req.params.id);
   if (id === req.user.id) return bad(res, "You can't delete yourself.");
-  db.prepare('DELETE FROM users WHERE id = ?').run(id);
+  await db.run('DELETE FROM users WHERE id = ?', id);
   res.json({ ok: true });
 });
 
@@ -111,11 +117,11 @@ function offerFields(b) {
     requirements: str(b.requirements, 1000),
     offerwall_id: b.offerwall_id ? int(b.offerwall_id) : null,
     category: ['game', 'app', 'survey', 'signup', 'shopping', 'video'].includes(b.category) ? b.category : 'game',
-    reward: Math.max(1, int(b.reward, 100)),
+    reward: Math.min(100_000_000, Math.max(1, int(b.reward, 100))),
     icon: str(b.icon, 8) || '🎮',
     color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#7c5cff',
     device: ['all', 'android', 'ios', 'desktop'].includes(b.device) ? b.device : 'all',
-    est_minutes: Math.max(1, int(b.est_minutes, 10)),
+    est_minutes: Math.min(1_000_000, Math.max(1, int(b.est_minutes, 10))),
     url: str(b.url, 500),
     featured: bool(b.featured),
     repeatable: bool(b.repeatable),
@@ -123,31 +129,31 @@ function offerFields(b) {
   };
 }
 
-router.get('/offers', (_req, res) => {
+router.get('/offers', async (_req, res) => {
   res.json({
-    offers: db.prepare('SELECT o.*, w.name AS provider FROM offers o LEFT JOIN offerwalls w ON w.id = o.offerwall_id ORDER BY o.id DESC').all(),
+    offers: await db.all('SELECT o.*, w.name AS provider FROM offers o LEFT JOIN offerwalls w ON w.id = o.offerwall_id ORDER BY o.id DESC'),
   });
 });
 
-router.post('/offers', (req, res) => {
+router.post('/offers', async (req, res) => {
   const f = offerFields(req.body);
   if (!f.title) return bad(res, 'Title is required.');
-  const info = db.prepare(`INSERT INTO offers (title, description, requirements, offerwall_id, category, reward, icon, color, device, est_minutes, url, featured, repeatable, active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    f.title, f.description, f.requirements, f.offerwall_id, f.category, f.reward, f.icon, f.color, f.device, f.est_minutes, f.url, f.featured, f.repeatable, f.active, Date.now());
-  res.json({ id: Number(info.lastInsertRowid) });
+  const row = await db.get(`INSERT INTO offers (title, description, requirements, offerwall_id, category, reward, icon, color, device, est_minutes, url, featured, repeatable, active, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+  f.title, f.description, f.requirements, f.offerwall_id, f.category, f.reward, f.icon, f.color, f.device, f.est_minutes, f.url, f.featured, f.repeatable, f.active, Date.now());
+  res.json({ id: row.id });
 });
 
-router.put('/offers/:id', (req, res) => {
+router.put('/offers/:id', async (req, res) => {
   const f = offerFields(req.body);
   if (!f.title) return bad(res, 'Title is required.');
-  db.prepare(`UPDATE offers SET title=?, description=?, requirements=?, offerwall_id=?, category=?, reward=?, icon=?, color=?, device=?, est_minutes=?, url=?, featured=?, repeatable=?, active=? WHERE id=?`)
-    .run(f.title, f.description, f.requirements, f.offerwall_id, f.category, f.reward, f.icon, f.color, f.device, f.est_minutes, f.url, f.featured, f.repeatable, f.active, int(req.params.id));
+  await db.run(`UPDATE offers SET title=?, description=?, requirements=?, offerwall_id=?, category=?, reward=?, icon=?, color=?, device=?, est_minutes=?, url=?, featured=?, repeatable=?, active=? WHERE id=?`,
+    f.title, f.description, f.requirements, f.offerwall_id, f.category, f.reward, f.icon, f.color, f.device, f.est_minutes, f.url, f.featured, f.repeatable, f.active, int(req.params.id));
   res.json({ ok: true });
 });
 
-router.delete('/offers/:id', (req, res) => {
-  db.prepare('DELETE FROM offers WHERE id = ?').run(int(req.params.id));
+router.delete('/offers/:id', async (req, res) => {
+  await db.run('DELETE FROM offers WHERE id = ?', int(req.params.id));
   res.json({ ok: true });
 });
 
@@ -159,90 +165,90 @@ function wallFields(b) {
     tagline: str(b.tagline, 120),
     color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#7c5cff',
     icon: str(b.icon, 8) || '💎',
-    bonus_percent: Math.max(0, int(b.bonus_percent)),
+    bonus_percent: Math.min(1000, Math.max(0, int(b.bonus_percent))),
     active: 'active' in b ? bool(b.active) : 1,
     sort: int(b.sort),
   };
 }
 
-router.get('/offerwalls', (_req, res) => {
-  res.json({ offerwalls: db.prepare('SELECT * FROM offerwalls ORDER BY sort, id').all() });
+router.get('/offerwalls', async (_req, res) => {
+  res.json({ offerwalls: await db.all('SELECT * FROM offerwalls ORDER BY sort, id') });
 });
 
-router.post('/offerwalls', (req, res) => {
+router.post('/offerwalls', async (req, res) => {
   const f = wallFields(req.body);
   if (!f.name || !f.slug) return bad(res, 'Name is required.');
   try {
-    const info = db.prepare('INSERT INTO offerwalls (name, slug, tagline, color, icon, bonus_percent, active, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(f.name, f.slug, f.tagline, f.color, f.icon, f.bonus_percent, f.active, f.sort);
-    res.json({ id: Number(info.lastInsertRowid) });
-  } catch {
+    const row = await db.get('INSERT INTO offerwalls (name, slug, tagline, color, icon, bonus_percent, active, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      f.name, f.slug, f.tagline, f.color, f.icon, f.bonus_percent, f.active, f.sort);
+    res.json({ id: row.id });
+  } catch (err) {
+    if (!isUnique(err)) throw err;
     bad(res, 'An offerwall with that slug already exists.');
   }
 });
 
-router.put('/offerwalls/:id', (req, res) => {
+router.put('/offerwalls/:id', async (req, res) => {
   const f = wallFields(req.body);
   if (!f.name || !f.slug) return bad(res, 'Name is required.');
   try {
-    db.prepare('UPDATE offerwalls SET name=?, slug=?, tagline=?, color=?, icon=?, bonus_percent=?, active=?, sort=? WHERE id=?')
-      .run(f.name, f.slug, f.tagline, f.color, f.icon, f.bonus_percent, f.active, f.sort, int(req.params.id));
+    await db.run('UPDATE offerwalls SET name=?, slug=?, tagline=?, color=?, icon=?, bonus_percent=?, active=?, sort=? WHERE id=?',
+      f.name, f.slug, f.tagline, f.color, f.icon, f.bonus_percent, f.active, f.sort, int(req.params.id));
     res.json({ ok: true });
-  } catch {
+  } catch (err) {
+    if (!isUnique(err)) throw err;
     bad(res, 'An offerwall with that slug already exists.');
   }
 });
 
-router.delete('/offerwalls/:id', (req, res) => {
-  db.prepare('DELETE FROM offerwalls WHERE id = ?').run(int(req.params.id));
+router.delete('/offerwalls/:id', async (req, res) => {
+  await db.run('DELETE FROM offerwalls WHERE id = ?', int(req.params.id));
   res.json({ ok: true });
 });
 
 /* ------------------------------------------------------------ completions */
 
-router.get('/completions', (req, res) => {
+router.get('/completions', async (req, res) => {
   const status = ['pending', 'completed', 'rejected'].includes(req.query.status) ? req.query.status : null;
   res.json({
-    completions: db.prepare(`SELECT c.*, u.username FROM offer_completions c JOIN users u ON u.id = c.user_id
-      ${status ? 'WHERE c.status = ?' : ''} ORDER BY c.id DESC LIMIT 300`).all(...(status ? [status] : [])),
+    completions: await db.all(`SELECT c.*, u.username FROM offer_completions c JOIN users u ON u.id = c.user_id
+      ${status ? 'WHERE c.status = ?' : ''} ORDER BY c.id DESC LIMIT 300`, ...(status ? [status] : [])),
   });
 });
 
-router.post('/completions/:id/approve', (req, res) => {
-  try { approveCompletion(int(req.params.id)); res.json({ ok: true }); } catch (e) { bad(res, e.message); }
+router.post('/completions/:id/approve', async (req, res) => {
+  try { await approveCompletion(int(req.params.id)); res.json({ ok: true }); } catch (e) { bad(res, e.message); }
 });
 
-router.post('/completions/:id/reject', (req, res) => {
-  try { rejectCompletion(int(req.params.id), str(req.body.note, 200)); res.json({ ok: true }); } catch (e) { bad(res, e.message); }
+router.post('/completions/:id/reject', async (req, res) => {
+  try { await rejectCompletion(int(req.params.id), str(req.body.note, 200)); res.json({ ok: true }); } catch (e) { bad(res, e.message); }
 });
 
 /* ------------------------------------------------------------ withdrawals */
 
-router.get('/withdrawals', (req, res) => {
+router.get('/withdrawals', async (req, res) => {
   const status = ['pending', 'paid', 'rejected'].includes(req.query.status) ? req.query.status : null;
   res.json({
-    withdrawals: db.prepare(`SELECT w.*, u.username, u.email FROM withdrawals w JOIN users u ON u.id = w.user_id
-      ${status ? 'WHERE w.status = ?' : ''} ORDER BY w.id DESC LIMIT 300`).all(...(status ? [status] : [])),
+    withdrawals: await db.all(`SELECT w.*, u.username, u.email FROM withdrawals w JOIN users u ON u.id = w.user_id
+      ${status ? 'WHERE w.status = ?' : ''} ORDER BY w.id DESC LIMIT 300`, ...(status ? [status] : [])),
   });
 });
 
-router.post('/withdrawals/:id/:action', (req, res) => {
+router.post('/withdrawals/:id/:action', async (req, res) => {
   const { action } = req.params;
   if (!['pay', 'reject'].includes(action)) return bad(res, 'Unknown action.', 404);
-  try {
-    tx(() => {
-      const w = db.prepare('SELECT * FROM withdrawals WHERE id = ?').get(int(req.params.id));
-      if (!w) throw new Error('Withdrawal not found.');
-      if (w.status !== 'pending') throw new Error('Withdrawal already processed.');
-      const status = action === 'pay' ? 'paid' : 'rejected';
-      db.prepare('UPDATE withdrawals SET status = ?, admin_note = ?, processed_at = ? WHERE id = ?')
-        .run(status, str(req.body.note, 300), Date.now(), w.id);
-      if (status === 'rejected') credit(w.user_id, w.coins, 'refund', `Refund: ${w.method_name} cashout #${w.id}`);
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    bad(res, e.message);
-  }
+  const result = await db.tx(async (t) => {
+    const w = await t.get('SELECT * FROM withdrawals WHERE id = ?', int(req.params.id));
+    if (!w) return 'Withdrawal not found.';
+    const status = action === 'pay' ? 'paid' : 'rejected';
+    const r = await t.run("UPDATE withdrawals SET status = ?, admin_note = ?, processed_at = ? WHERE id = ? AND status = 'pending'",
+      status, str(req.body.note, 300), Date.now(), w.id);
+    if (r.changes !== 1) return 'Withdrawal already processed.';
+    if (status === 'rejected') await credit(t, w.user_id, w.coins, 'refund', `Refund: ${w.method_name} cashout #${w.id}`);
+    return null;
+  });
+  if (result) return bad(res, result);
+  res.json({ ok: true });
 });
 
 /* -------------------------------------------------------- reward methods */
@@ -254,74 +260,71 @@ function methodFields(b) {
     icon: str(b.icon, 8) || '💵',
     color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#22c55e',
     field_label: str(b.field_label, 60) || 'Email',
-    min_coins: Math.max(1, int(b.min_coins, 1000)),
+    min_coins: Math.min(100_000_000, Math.max(1, int(b.min_coins, 1000))),
     active: 'active' in b ? bool(b.active) : 1,
     sort: int(b.sort),
   };
 }
 
-router.get('/reward-methods', (_req, res) => {
-  res.json({ methods: db.prepare('SELECT * FROM reward_methods ORDER BY sort, id').all() });
+router.get('/reward-methods', async (_req, res) => {
+  res.json({ methods: await db.all('SELECT * FROM reward_methods ORDER BY sort, id') });
 });
 
-router.post('/reward-methods', (req, res) => {
+router.post('/reward-methods', async (req, res) => {
   const f = methodFields(req.body);
   if (!f.name) return bad(res, 'Name is required.');
-  const info = db.prepare('INSERT INTO reward_methods (name, category, icon, color, field_label, min_coins, active, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(f.name, f.category, f.icon, f.color, f.field_label, f.min_coins, f.active, f.sort);
-  res.json({ id: Number(info.lastInsertRowid) });
+  const row = await db.get('INSERT INTO reward_methods (name, category, icon, color, field_label, min_coins, active, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+    f.name, f.category, f.icon, f.color, f.field_label, f.min_coins, f.active, f.sort);
+  res.json({ id: row.id });
 });
 
-router.put('/reward-methods/:id', (req, res) => {
+router.put('/reward-methods/:id', async (req, res) => {
   const f = methodFields(req.body);
   if (!f.name) return bad(res, 'Name is required.');
-  db.prepare('UPDATE reward_methods SET name=?, category=?, icon=?, color=?, field_label=?, min_coins=?, active=?, sort=? WHERE id=?')
-    .run(f.name, f.category, f.icon, f.color, f.field_label, f.min_coins, f.active, f.sort, int(req.params.id));
+  await db.run('UPDATE reward_methods SET name=?, category=?, icon=?, color=?, field_label=?, min_coins=?, active=?, sort=? WHERE id=?',
+    f.name, f.category, f.icon, f.color, f.field_label, f.min_coins, f.active, f.sort, int(req.params.id));
   res.json({ ok: true });
 });
 
-router.delete('/reward-methods/:id', (req, res) => {
-  db.prepare('DELETE FROM reward_methods WHERE id = ?').run(int(req.params.id));
+router.delete('/reward-methods/:id', async (req, res) => {
+  await db.run('DELETE FROM reward_methods WHERE id = ?', int(req.params.id));
   res.json({ ok: true });
 });
 
 /* ----------------------------------------------------------- promo codes */
 
-router.get('/promos', (_req, res) => {
-  res.json({ promos: db.prepare('SELECT * FROM promo_codes ORDER BY created_at DESC').all() });
+router.get('/promos', async (_req, res) => {
+  res.json({ promos: await db.all('SELECT * FROM promo_codes ORDER BY created_at DESC') });
 });
 
-router.post('/promos', (req, res) => {
+router.post('/promos', async (req, res) => {
   const code = str(req.body.code, 32).toUpperCase();
   if (!/^[A-Z0-9_-]{3,32}$/.test(code)) return bad(res, 'Code must be 3-32 letters, numbers, - or _.');
   const reward = int(req.body.reward);
-  if (reward < 1) return bad(res, 'Reward must be at least 1.');
+  if (reward < 1 || reward > 100_000_000) return bad(res, 'Reward must be between 1 and 100,000,000.');
   const days = int(req.body.expires_days);
-  try {
-    db.prepare('INSERT INTO promo_codes (code, reward, max_uses, expires_at, active, created_at) VALUES (?, ?, ?, ?, 1, ?)')
-      .run(code, reward, Math.max(0, int(req.body.max_uses)), days > 0 ? Date.now() + days * DAY_MS : null, Date.now());
-    res.json({ ok: true });
-  } catch {
-    bad(res, 'That code already exists.');
-  }
-});
-
-router.patch('/promos/:code', (req, res) => {
-  db.prepare('UPDATE promo_codes SET active = ? WHERE code = ?').run(bool(req.body.active), req.params.code);
+  const r = await db.run('INSERT INTO promo_codes (code, reward, max_uses, expires_at, active, created_at) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT (code) DO NOTHING',
+    code, reward, Math.max(0, int(req.body.max_uses)), days > 0 ? Date.now() + days * DAY_MS : null, Date.now());
+  if (r.changes !== 1) return bad(res, 'That code already exists.');
   res.json({ ok: true });
 });
 
-router.delete('/promos/:code', (req, res) => {
-  db.prepare('DELETE FROM promo_codes WHERE code = ?').run(req.params.code);
+router.patch('/promos/:code', async (req, res) => {
+  await db.run('UPDATE promo_codes SET active = ? WHERE code = ?', bool(req.body.active), req.params.code.toUpperCase());
+  res.json({ ok: true });
+});
+
+router.delete('/promos/:code', async (req, res) => {
+  await db.run('DELETE FROM promo_codes WHERE code = ?', req.params.code.toUpperCase());
   res.json({ ok: true });
 });
 
 /* ---------------------------------------------------------- transactions */
 
-router.get('/transactions', (_req, res) => {
+router.get('/transactions', async (_req, res) => {
   res.json({
-    transactions: db.prepare(`SELECT t.*, u.username FROM transactions t JOIN users u ON u.id = t.user_id
-      ORDER BY t.id DESC LIMIT 300`).all(),
+    transactions: await db.all(`SELECT t.*, u.username FROM transactions t JOIN users u ON u.id = t.user_id
+      ORDER BY t.id DESC LIMIT 300`),
   });
 });
 
@@ -331,14 +334,15 @@ const EDITABLE = ['site_name', 'currency_name', 'coins_per_usd', 'signup_bonus',
   'min_withdraw', 'auto_approve_offers', 'announcement', 'maintenance', 'postback_secret'];
 const NUMERIC = ['coins_per_usd', 'signup_bonus', 'daily_reward', 'referral_percent', 'min_withdraw'];
 
-router.get('/settings', (_req, res) => res.json({ settings: getSettings() }));
+router.get('/settings', async (_req, res) => res.json({ settings: await getSettings() }));
 
-router.put('/settings', (req, res) => {
+router.put('/settings', async (req, res) => {
+  const updates = [];
   for (const key of EDITABLE) {
     if (!(key in req.body)) continue;
     let value = req.body[key];
     if (NUMERIC.includes(key)) {
-      value = Math.max(0, int(value));
+      value = Math.min(1_000_000_000, Math.max(0, int(value)));
       if (key === 'coins_per_usd' && value < 1) return bad(res, 'Gems per $1 must be at least 1.');
     } else if (key === 'auto_approve_offers' || key === 'maintenance') {
       value = bool(value);
@@ -346,9 +350,10 @@ router.put('/settings', (req, res) => {
       value = str(value, 500);
       if (key === 'postback_secret' && value.length < 12) return bad(res, 'Postback secret must be at least 12 characters.');
     }
-    setSetting(key, value);
+    updates.push([key, value]);
   }
-  res.json({ settings: getSettings() });
+  for (const [k, v] of updates) await setSetting(k, v);
+  res.json({ settings: await getSettings() });
 });
 
 module.exports = router;

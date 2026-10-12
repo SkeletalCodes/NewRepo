@@ -31,10 +31,12 @@
   }
 
   async function api(path, opts = {}) {
+    const method = opts.method || (opts.body ? 'POST' : 'GET');
+    const body = method === 'GET' ? undefined : JSON.stringify(opts.body || {});
     const res = await fetch(`/api${path}`, {
-      method: opts.method || (opts.body ? 'POST' : 'GET'),
-      headers: opts.body ? { 'Content-Type': 'application/json' } : {},
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body,
       credentials: 'same-origin',
     });
     let data = {};
@@ -540,6 +542,7 @@
           `}
         </div>
         ${c.announcement && !inAdmin ? `<div class="announcement">📣 <span>${esc(c.announcement)}</span></div>` : ''}
+        ${c.ephemeral && isAdmin ? '<div class="announcement" style="background:rgba(251,191,36,.15)">⚠️ <span><b>Temporary storage:</b> no database is connected, so accounts and balances will be wiped. Add a Postgres database (see README → Deploying to Vercel) to keep data.</span></div>' : ''}
         ${c.maintenance ? '<div class="announcement" style="background:rgba(244,63,94,.15)">🛠️ Maintenance mode is ON — only admins can use the site.</div>' : ''}
         ${inAdmin ? '' : `<div class="ticker-bar"><div class="ticker" id="ticker">${tickerHTML()}</div></div>`}
         <main class="content" id="content">${content || ''}</main>

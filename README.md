@@ -2,7 +2,7 @@
 
 A complete GPT / offerwall rewards site (similar to Gemsloot, Freecash, etc.): users earn **Gems** by completing offers and cash them out for PayPal, crypto, gift cards and gaming currencies. It ships with an admin panel and demo offers.
 
-Built with **Node.js + Express + SQLite** (Node's built-in `node:sqlite`, so there are no native modules to compile). The front end is a single-page app in vanilla JS and CSS, with no build step.
+Built with **Node.js + Express**. It uses **Postgres** when `DATABASE_URL` is set (production, Vercel) and falls back to **SQLite** (Node's built-in `node:sqlite`) for zero-config local development. The front end is a single-page app in vanilla JS and CSS, with no build step.
 
 ## Quick start
 
@@ -19,7 +19,18 @@ Requires **Node.js 22.5+**.
 ADMIN_USERNAME=admin ADMIN_PASSWORD='a-strong-password' ADMIN_EMAIL=you@example.com npm start
 ```
 
-Run the end-to-end API tests with `npm test`.
+Run the end-to-end API tests with `npm test` (SQLite), or `DATABASE_URL=postgres://... npm test` to test against Postgres.
+
+## Deploying to Vercel
+
+1. Import the GitHub repo in Vercel. No build settings are needed: it's detected as an Express app, and `public/` is served from the CDN.
+2. **Add a database** (required to keep data). In your Vercel project, open **Storage → Create Database → Neon (Postgres)** and connect it to the project. This sets `DATABASE_URL` automatically. The free plan is enough to start.
+3. **Redeploy**: Deployments → ⋯ → Redeploy. Tables and demo content are created automatically on the first request.
+4. Open the site and **sign up immediately**. The first account becomes the admin.
+
+Without a database the site still runs on Vercel, but it uses temporary storage that Vercel wipes regularly, and each server instance has its own copy. Admins see a yellow warning banner while it's in this mode.
+
+Any other Postgres works too (Supabase, Railway, Render): set `DATABASE_URL` to its connection string.
 
 ## Features
 
@@ -69,9 +80,10 @@ Admin → Settings shows your postback URL:
 | Env var | Default | |
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
-| `DB_PATH` | `data/gemrush.db` | SQLite file |
+| `DATABASE_URL` | — | Postgres connection string (also reads `POSTGRES_URL`). Use this in production. |
+| `DB_PATH` | `data/gemrush.db` | SQLite file, used only when no Postgres URL is set |
 | `NODE_ENV` | — | `production` marks cookies `Secure` (needs HTTPS) |
-| `TRUST_PROXY` | — | `1` when behind a reverse proxy (for correct IPs and rate limits) |
+| `TRUST_PROXY` | — | `1` when behind a reverse proxy (for correct IPs and rate limits). Automatic on Vercel. |
 | `SEED_DEMO` | `1` | `0` to skip demo users on first run |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` | — | create or reset an admin on boot |
 
@@ -80,13 +92,14 @@ Admin → Settings shows your postback URL:
 - Passwords are hashed with scrypt. Sessions use random tokens stored hashed, in `httpOnly` `SameSite=Lax` cookies.
 - Login and registration are rate-limited. State-changing API calls must be JSON from the same origin (CSRF defense).
 - A strict Content-Security-Policy is set, and all user content is HTML-escaped on render.
-- Balance changes run in SQL transactions and every change is written to a ledger (`transactions`).
+- Balance changes run in SQL transactions, debits use conditional updates so concurrent requests can't overdraw, and every change is written to a ledger (`transactions`).
+- Rate limits are kept in memory, so on serverless hosts they apply per instance and are weaker than on a single server.
 
 ## Project layout
 
 ```
 server.js          Express app, security headers, postback endpoint
-src/db.js          Schema, settings, ledger helper
+src/db.js          Postgres/SQLite adapter, schema, settings, ledger helpers
 src/auth.js        Password hashing, sessions, rate limiting
 src/api.js         Public/user API (auth, offers, daily, promo, cashout, feed, leaderboard)
 src/admin.js       Admin API

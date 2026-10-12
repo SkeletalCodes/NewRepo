@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { db, tx, credit } = require('./db');
+const { db, credit } = require('./db');
 const { hashPassword } = require('./auth');
 
 const OFFERWALLS = [
@@ -70,71 +70,70 @@ const METHODS = [
 const DEMO_NAMES = ['NovaKid', 'pixelhunter', 'GemQueen', 'xXshadowXx', 'lootgoblin', 'TurboTom', 'mila_k', 'CryptoCat',
   'ace_runner', 'BlueJay22', 'sk8rboi', 'FrostByte', 'luckyluna', 'Zed_main', 'questmaster'];
 
-function seed() {
-  const hasData = db.prepare('SELECT COUNT(*) AS n FROM offerwalls').get().n > 0;
-  if (hasData) return;
+/** Seed demo content once. Uses a settings marker so concurrent cold starts can't double-seed. */
+async function seed() {
+  await db.tx(async (t) => {
+    const claimed = await t.run("INSERT INTO settings (key, value) VALUES ('seeded', '1') ON CONFLICT (key) DO NOTHING");
+    if (claimed.changes !== 1) return;
+    if ((await t.get('SELECT COUNT(*) AS n FROM offerwalls')).n > 0) return; // pre-existing data
 
-  tx(() => {
     const now = Date.now();
     const wallId = {};
-    OFFERWALLS.forEach(([name, slug, tagline, color, icon, bonus], i) => {
-      const info = db.prepare('INSERT INTO offerwalls (name, slug, tagline, color, icon, bonus_percent, sort) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(name, slug, tagline, color, icon, bonus, i);
-      wallId[slug] = Number(info.lastInsertRowid);
-    });
-    const offerIds = [];
+    for (const [i, [name, slug, tagline, color, icon, bonus]] of OFFERWALLS.entries()) {
+      const row = await t.get('INSERT INTO offerwalls (name, slug, tagline, color, icon, bonus_percent, sort) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
+        name, slug, tagline, color, icon, bonus, i);
+      wallId[slug] = row.id;
+    }
+    const offers = [];
     for (const [title, wall, cat, reward, icon, color, device, mins, featured, repeatable, desc, reqs] of OFFERS) {
-      const info = db.prepare(`INSERT INTO offers (title, description, requirements, offerwall_id, category, reward, icon, color, device, est_minutes, featured, repeatable, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(title, desc, reqs, wallId[wall], cat, reward, icon, color, device, mins, featured, repeatable, now);
-      offerIds.push(Number(info.lastInsertRowid));
+      const row = await t.get(`INSERT INTO offers (title, description, requirements, offerwall_id, category, reward, icon, color, device, est_minutes, featured, repeatable, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, title, desc, reqs, wallId[wall], cat, reward, icon, color, device, mins, featured, repeatable, now);
+      const w = OFFERWALLS.find((x) => x[1] === wall);
+      offers.push({ id: row.id, title, reward, provider: w[0] });
     }
     for (const [name, cat, icon, color, label, min, sort] of METHODS) {
-      db.prepare('INSERT INTO reward_methods (name, category, icon, color, field_label, min_coins, sort) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(name, cat, icon, color, label, min, sort);
+      await t.run('INSERT INTO reward_methods (name, category, icon, color, field_label, min_coins, sort) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        name, cat, icon, color, label, min, sort);
     }
-    db.prepare('INSERT OR IGNORE INTO promo_codes (code, reward, max_uses, created_at) VALUES (?, ?, ?, ?)').run('WELCOME', 100, 0, now);
+    await t.run('INSERT INTO promo_codes (code, reward, max_uses, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (code) DO NOTHING', 'WELCOME', 100, 0, now);
 
-    if (process.env.SEED_DEMO !== '0') seedDemoActivity(offerIds);
+    if (process.env.SEED_DEMO !== '0') await seedDemoActivity(t, offers);
   });
 }
 
 /** Demo accounts (cannot log in) plus some history so the feed and leaderboard aren't empty. */
-function seedDemoActivity(offerIds) {
+async function seedDemoActivity(t, offers) {
   const colors = ['#7c5cff', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#3b82f6'];
   const unusable = hashPassword(crypto.randomBytes(24).toString('hex'));
-  const offers = offerIds.map((id) => db.prepare('SELECT o.*, w.name AS provider FROM offers o LEFT JOIN offerwalls w ON w.id = o.offerwall_id WHERE o.id = ?').get(id));
   const now = Date.now();
-  DEMO_NAMES.forEach((name, i) => {
-    const info = db.prepare(`INSERT INTO users (username, email, password_hash, referral_code, avatar_color, onboarded, is_demo, created_at)
-      VALUES (?, ?, ?, ?, ?, 1, 1, ?)`).run(name, `${name.toLowerCase()}@demo.invalid`, unusable,
-      crypto.randomBytes(4).toString('hex').toUpperCase(), colors[i % colors.length], now - (20 - i) * 86400000);
-    const uid = Number(info.lastInsertRowid);
+  for (const [i, name] of DEMO_NAMES.entries()) {
+    const row = await t.get(`INSERT INTO users (username, email, password_hash, referral_code, avatar_color, onboarded, is_demo, created_at)
+      VALUES (?, ?, ?, ?, ?, 1, 1, ?) RETURNING id`, name, `${name.toLowerCase()}@demo.invalid`, unusable,
+    crypto.randomBytes(4).toString('hex').toUpperCase(), colors[i % colors.length], now - (20 - i) * 86400000);
     const count = 2 + (i % 4);
     for (let k = 0; k < count; k++) {
       const o = offers[(i * 3 + k * 5) % offers.length];
       const at = now - Math.floor(Math.random() * 6 * 86400000);
-      db.prepare(`INSERT INTO offer_completions (user_id, offer_id, offer_title, provider, reward, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)`).run(uid, o.id, o.title, o.provider, o.reward, at, at);
-      credit(uid, o.reward, 'offer', `${o.provider}: ${o.title}`);
-      db.prepare('UPDATE transactions SET created_at = ? WHERE id = (SELECT MAX(id) FROM transactions)').run(at);
-      db.prepare('UPDATE offers SET completions = completions + 1 WHERE id = ?').run(o.id);
+      await t.run(`INSERT INTO offer_completions (user_id, offer_id, offer_title, provider, reward, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)`, row.id, o.id, o.title, o.provider, o.reward, at, at);
+      await credit(t, row.id, o.reward, 'offer', `${o.provider}: ${o.title}`, at);
+      await t.run('UPDATE offers SET completions = completions + 1 WHERE id = ?', o.id);
     }
-  });
+  }
 }
 
 /** Create or promote an admin from ADMIN_USERNAME / ADMIN_EMAIL / ADMIN_PASSWORD env vars. */
-function ensureEnvAdmin() {
+async function ensureEnvAdmin() {
   const { ADMIN_USERNAME, ADMIN_EMAIL, ADMIN_PASSWORD } = process.env;
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD) return;
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(ADMIN_USERNAME);
+  const existing = await db.get('SELECT id FROM users WHERE lower(username) = lower(?)', ADMIN_USERNAME);
   if (existing) {
-    db.prepare("UPDATE users SET role = 'admin', password_hash = ?, banned = 0 WHERE id = ?").run(hashPassword(ADMIN_PASSWORD), existing.id);
+    await db.run("UPDATE users SET role = 'admin', password_hash = ?, banned = 0 WHERE id = ?", hashPassword(ADMIN_PASSWORD), existing.id);
   } else {
-    db.prepare(`INSERT INTO users (username, email, password_hash, role, referral_code, onboarded, created_at)
-      VALUES (?, ?, ?, 'admin', ?, 1, ?)`).run(ADMIN_USERNAME, (ADMIN_EMAIL || `${ADMIN_USERNAME}@localhost`).toLowerCase(),
-      hashPassword(ADMIN_PASSWORD), crypto.randomBytes(4).toString('hex').toUpperCase(), Date.now());
+    await db.run(`INSERT INTO users (username, email, password_hash, role, referral_code, onboarded, created_at)
+      VALUES (?, ?, ?, 'admin', ?, 1, ?) ON CONFLICT DO NOTHING`, ADMIN_USERNAME, (ADMIN_EMAIL || `${ADMIN_USERNAME}@localhost`).toLowerCase(),
+    hashPassword(ADMIN_PASSWORD), crypto.randomBytes(4).toString('hex').toUpperCase(), Date.now());
   }
-  console.log(`Admin account "${ADMIN_USERNAME}" is ready.`);
 }
 
 module.exports = { seed, ensureEnvAdmin };

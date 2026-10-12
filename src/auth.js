@@ -22,11 +22,11 @@ function verifyPassword(password, stored) {
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
-function createSession(res, userId) {
+async function createSession(res, userId) {
   const token = crypto.randomBytes(32).toString('base64url');
   const now = Date.now();
-  db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
-    .run(sha256(token), userId, now + SESSION_TTL_MS, now);
+  await db.run('INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)',
+    sha256(token), userId, now + SESSION_TTL_MS, now);
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
@@ -36,9 +36,9 @@ function createSession(res, userId) {
   });
 }
 
-function destroySession(req, res) {
+async function destroySession(req, res) {
   const token = readCookie(req, SESSION_COOKIE);
-  if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha256(token));
+  if (token) await db.run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
   res.clearCookie(SESSION_COOKIE, { path: '/' });
 }
 
@@ -56,12 +56,12 @@ function readCookie(req, name) {
 }
 
 /** Attaches req.user when a valid session cookie is present. */
-function loadUser(req, _res, next) {
+async function loadUser(req, _res, next) {
   const token = readCookie(req, SESSION_COOKIE);
   if (token) {
-    const row = db.prepare(`
+    const row = await db.get(`
       SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = ? AND s.expires_at > ?`).get(sha256(token), Date.now());
+      WHERE s.token_hash = ? AND s.expires_at > ?`, sha256(token), Date.now());
     if (row && !row.banned) req.user = row;
   }
   next();
