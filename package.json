@@ -1,0 +1,18 @@
+{
+  "name": "gemrush",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GemRush - a get-paid-to (GPT) rewards site with offers, cashouts and an admin panel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "test": "node --disable-warning=ExperimentalWarning test/smoke.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
