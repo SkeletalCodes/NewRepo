@@ -4,6 +4,7 @@ const express = require('express');
 const { db, credit, getSettings, setSetting } = require('./db');
 const { requireAdmin, hashPassword } = require('./auth');
 const { approveCompletion, rejectCompletion } = require('./rewards');
+const { PRESETS, SIG_METHODS, newToken, processPostback, buildTestPostback } = require('./offerwalls');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -41,7 +42,12 @@ router.get('/overview', async (_req, res) => {
     pending_withdrawals: await one("SELECT COUNT(*) AS n FROM withdrawals WHERE status = 'pending'"),
     pending_withdrawals_usd: await one("SELECT COALESCE(SUM(usd),0) AS n FROM withdrawals WHERE status = 'pending'"),
     paid_usd: await one("SELECT COALESCE(SUM(usd),0) AS n FROM withdrawals WHERE status IN ('approved','paid')"),
-    active_offers: await one('SELECT COUNT(*) AS n FROM offers WHERE active = 1'),
+    active_walls: await one('SELECT COUNT(*) AS n FROM offerwalls WHERE active = 1'),
+    revenue_cents: await one("SELECT COALESCE(SUM(payout_cents),0) AS n FROM offer_completions WHERE status = 'completed'"),
+    paid_to_users_cents: await one("SELECT COALESCE(SUM(reward),0) AS n FROM offer_completions WHERE status = 'completed'"),
+    held_cents: await one("SELECT COALESCE(SUM(reward),0) AS n FROM offer_completions WHERE status = 'pending'"),
+    postbacks_today: await one('SELECT COUNT(*) AS n FROM postback_logs WHERE created_at > ?', now - DAY_MS),
+    rejected_today: await one("SELECT COUNT(*) AS n FROM postback_logs WHERE result = 'rejected' AND created_at > ?", now - DAY_MS),
     signups,
     earnings,
     recent_users: await db.all('SELECT id, username, email, balance, created_at FROM users ORDER BY id DESC LIMIT 6'),
@@ -108,54 +114,10 @@ router.delete('/users/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---------------------------------------------------- offers & offerwalls */
+/* ------------------------------------------------------------ offerwalls */
 
-function offerFields(b) {
-  return {
-    title: str(b.title, 120),
-    description: str(b.description, 1000),
-    requirements: str(b.requirements, 1000),
-    offerwall_id: b.offerwall_id ? int(b.offerwall_id) : null,
-    category: ['game', 'app', 'survey', 'signup', 'shopping', 'video'].includes(b.category) ? b.category : 'game',
-    reward: Math.min(100_000_000, Math.max(1, int(b.reward, 100))),
-    icon: str(b.icon, 200) || 'fa-gamepad',
-    color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#7c5cff',
-    device: ['all', 'android', 'ios', 'desktop'].includes(b.device) ? b.device : 'all',
-    est_minutes: Math.min(1_000_000, Math.max(1, int(b.est_minutes, 10))),
-    url: str(b.url, 500),
-    featured: bool(b.featured),
-    repeatable: bool(b.repeatable),
-    active: 'active' in b ? bool(b.active) : 1,
-  };
-}
-
-router.get('/offers', async (_req, res) => {
-  res.json({
-    offers: await db.all('SELECT o.*, w.name AS provider FROM offers o LEFT JOIN offerwalls w ON w.id = o.offerwall_id ORDER BY o.id DESC'),
-  });
-});
-
-router.post('/offers', async (req, res) => {
-  const f = offerFields(req.body);
-  if (!f.title) return bad(res, 'Title is required.');
-  const row = await db.get(`INSERT INTO offers (title, description, requirements, offerwall_id, category, reward, icon, color, device, est_minutes, url, featured, repeatable, active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-  f.title, f.description, f.requirements, f.offerwall_id, f.category, f.reward, f.icon, f.color, f.device, f.est_minutes, f.url, f.featured, f.repeatable, f.active, Date.now());
-  res.json({ id: row.id });
-});
-
-router.put('/offers/:id', async (req, res) => {
-  const f = offerFields(req.body);
-  if (!f.title) return bad(res, 'Title is required.');
-  await db.run(`UPDATE offers SET title=?, description=?, requirements=?, offerwall_id=?, category=?, reward=?, icon=?, color=?, device=?, est_minutes=?, url=?, featured=?, repeatable=?, active=? WHERE id=?`,
-    f.title, f.description, f.requirements, f.offerwall_id, f.category, f.reward, f.icon, f.color, f.device, f.est_minutes, f.url, f.featured, f.repeatable, f.active, int(req.params.id));
-  res.json({ ok: true });
-});
-
-router.delete('/offers/:id', async (req, res) => {
-  await db.run('DELETE FROM offers WHERE id = ?', int(req.params.id));
-  res.json({ ok: true });
-});
+const COLOR = /^#[0-9a-fA-F]{6}$/;
+const PARAM = (v, d) => (/^[A-Za-z0-9_.\-[\]]{1,40}$/.test(String(v || '')) ? String(v) : d);
 
 function wallFields(b) {
   const name = str(b.name, 60);
@@ -163,47 +125,127 @@ function wallFields(b) {
     name,
     slug: (str(b.slug, 60) || name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
     tagline: str(b.tagline, 120),
-    color: /^#[0-9a-fA-F]{6}$/.test(b.color) ? b.color : '#7c5cff',
+    color: COLOR.test(b.color) ? b.color : '#eac837',
     icon: str(b.icon, 200) || 'fa-layer-group',
     bonus_percent: Math.min(1000, Math.max(0, int(b.bonus_percent))),
     active: 'active' in b ? bool(b.active) : 1,
     sort: int(b.sort),
+    preset: PRESETS[b.preset] ? b.preset : 'custom',
+    iframe_url: str(b.iframe_url, 1000),
+    open_mode: b.open_mode === 'tab' ? 'tab' : 'iframe',
+    ip_whitelist: str(b.ip_whitelist, 1000),
+    sig_method: SIG_METHODS.includes(b.sig_method) ? b.sig_method : 'none',
+    sig_mode: b.sig_mode === 'url' ? 'url' : 'template',
+    sig_template: str(b.sig_template, 300),
+    sig_param: PARAM(b.sig_param, 'hash'),
+    sig_secret: str(b.sig_secret, 300),
+    p_user: PARAM(b.p_user, 'user_id'),
+    p_txid: PARAM(b.p_txid, 'txid'),
+    p_reward: PARAM(b.p_reward, 'reward'),
+    p_payout: PARAM(b.p_payout, 'payout'),
+    p_status: PARAM(b.p_status, 'status'),
+    p_offer: PARAM(b.p_offer, 'offer'),
+    p_ip: PARAM(b.p_ip, 'ip'),
+    amount_source: b.amount_source === 'payout' ? 'payout' : 'reward',
+    amount_unit: b.amount_unit === 'dollars' ? 'dollars' : 'cents',
+    revenue_share: Math.min(100, Math.max(0, int(b.revenue_share, 70))),
+    reversal_values: str(b.reversal_values, 200) || '2,reversed,chargeback,rejected',
+    success_response: str(b.success_response, 60) || '1',
+    hold_hours: Math.min(24 * 60, Math.max(0, int(b.hold_hours))),
   };
 }
 
+function validateWall(f) {
+  if (!f.name || !f.slug) return 'Name is required.';
+  if (f.iframe_url && !/^https:\/\//i.test(f.iframe_url)) return 'The wall URL must start with https://';
+  if (f.sig_method !== 'none') {
+    if (f.sig_method.startsWith('hmac') && !f.sig_secret) return 'HMAC signatures need a secret key.';
+    if (f.sig_mode === 'template' && !f.sig_template) return 'Enter what gets hashed, e.g. {txid}-{secret}.';
+  }
+  return null;
+}
+
+const WALL_COLS = ['name', 'slug', 'tagline', 'color', 'icon', 'bonus_percent', 'active', 'sort', 'preset', 'iframe_url', 'open_mode',
+  'ip_whitelist', 'sig_method', 'sig_mode', 'sig_template', 'sig_param', 'sig_secret', 'p_user', 'p_txid', 'p_reward', 'p_payout',
+  'p_status', 'p_offer', 'p_ip', 'amount_source', 'amount_unit', 'revenue_share', 'reversal_values', 'success_response', 'hold_hours'];
+
+router.get('/offerwall-presets', (_req, res) => res.json({ presets: PRESETS, sig_methods: SIG_METHODS }));
+
 router.get('/offerwalls', async (_req, res) => {
-  res.json({ offerwalls: await db.all('SELECT * FROM offerwalls ORDER BY sort, id') });
+  const walls = await db.all(`SELECT w.*,
+      (SELECT COUNT(*) FROM offer_completions c WHERE c.offerwall_id = w.id AND c.status = 'completed') AS completed,
+      (SELECT COALESCE(SUM(c.reward), 0) FROM offer_completions c WHERE c.offerwall_id = w.id AND c.status = 'completed') AS paid_cents,
+      (SELECT COALESCE(SUM(c.payout_cents), 0) FROM offer_completions c WHERE c.offerwall_id = w.id AND c.status = 'completed') AS revenue_cents,
+      (SELECT MAX(l.created_at) FROM postback_logs l WHERE l.offerwall_id = w.id) AS last_postback
+    FROM offerwalls w ORDER BY w.sort, w.id`);
+  res.json({ offerwalls: walls });
 });
 
 router.post('/offerwalls', async (req, res) => {
   const f = wallFields(req.body);
-  if (!f.name || !f.slug) return bad(res, 'Name is required.');
+  const err = validateWall(f);
+  if (err) return bad(res, err);
   try {
-    const row = await db.get('INSERT INTO offerwalls (name, slug, tagline, color, icon, bonus_percent, active, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
-      f.name, f.slug, f.tagline, f.color, f.icon, f.bonus_percent, f.active, f.sort);
+    const row = await db.get(`INSERT INTO offerwalls (${WALL_COLS.join(', ')}, postback_token, created_at)
+      VALUES (${WALL_COLS.map(() => '?').join(', ')}, ?, ?) RETURNING id`, ...WALL_COLS.map((c) => f[c]), newToken(), Date.now());
     res.json({ id: row.id });
-  } catch (err) {
-    if (!isUnique(err)) throw err;
+  } catch (e) {
+    if (!isUnique(e)) throw e;
     bad(res, 'An offerwall with that slug already exists.');
   }
 });
 
 router.put('/offerwalls/:id', async (req, res) => {
   const f = wallFields(req.body);
-  if (!f.name || !f.slug) return bad(res, 'Name is required.');
+  const err = validateWall(f);
+  if (err) return bad(res, err);
   try {
-    await db.run('UPDATE offerwalls SET name=?, slug=?, tagline=?, color=?, icon=?, bonus_percent=?, active=?, sort=? WHERE id=?',
-      f.name, f.slug, f.tagline, f.color, f.icon, f.bonus_percent, f.active, f.sort, int(req.params.id));
+    await db.run(`UPDATE offerwalls SET ${WALL_COLS.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...WALL_COLS.map((c) => f[c]), int(req.params.id));
     res.json({ ok: true });
-  } catch (err) {
-    if (!isUnique(err)) throw err;
+  } catch (e) {
+    if (!isUnique(e)) throw e;
     bad(res, 'An offerwall with that slug already exists.');
   }
+});
+
+router.post('/offerwalls/:id/token', async (req, res) => {
+  await db.run('UPDATE offerwalls SET postback_token = ? WHERE id = ?', newToken(), int(req.params.id));
+  res.json({ ok: true });
 });
 
 router.delete('/offerwalls/:id', async (req, res) => {
   await db.run('DELETE FROM offerwalls WHERE id = ?', int(req.params.id));
   res.json({ ok: true });
+});
+
+/** Send a correctly signed test postback to this wall, crediting the admin, then reverse it. */
+router.post('/offerwalls/:id/test', async (req, res) => {
+  const wall = await db.get('SELECT * FROM offerwalls WHERE id = ?', int(req.params.id));
+  if (!wall) return bad(res, 'Offerwall not found.', 404);
+  const base = `${req.protocol}://${req.get('host')}`;
+  const allowed = String(wall.ip_whitelist || '').split(/[\s,]+/).find((ip) => ip && !ip.endsWith('*'));
+  const ctx = { ip: allowed || req.ip, method: 'TEST' };
+  const txid = `test-${Date.now().toString(36)}`;
+  const cents = 100;
+  const credit1 = buildTestPostback(wall, base, { userId: req.user.id, txid, cents });
+  const first = await processPostback(wall, credit1.params, { ...ctx, fullUrl: credit1.fullUrl });
+  const rev = buildTestPostback(wall, base, { userId: req.user.id, txid, cents, reversal: true });
+  const second = await processPostback(wall, rev.params, { ...ctx, fullUrl: rev.fullUrl });
+  res.json({ url: credit1.fullUrl, credit: first, reversal: second });
+});
+
+router.get('/postback-logs', async (req, res) => {
+  const wallId = int(req.query.wall);
+  const result = ['credited', 'held', 'duplicate', 'reversed', 'ignored', 'rejected'].includes(req.query.result) ? req.query.result : null;
+  const where = [];
+  const params = [];
+  if (wallId) { where.push('l.offerwall_id = ?'); params.push(wallId); }
+  if (result) { where.push('l.result = ?'); params.push(result); }
+  res.json({
+    logs: await db.all(`SELECT l.*, w.name AS wall_name, u.username FROM postback_logs l
+      LEFT JOIN offerwalls w ON w.id = l.offerwall_id LEFT JOIN users u ON u.id = l.user_id
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY l.id DESC LIMIT 300`, ...params),
+  });
 });
 
 /* ------------------------------------------------------------ completions */
@@ -330,8 +372,7 @@ router.get('/transactions', async (_req, res) => {
 
 /* -------------------------------------------------------------- settings */
 
-const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent',
-  'auto_approve_offers', 'announcement', 'maintenance', 'postback_secret'];
+const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent', 'announcement', 'maintenance'];
 const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent'];
 
 router.get('/settings', async (_req, res) => res.json({ settings: await getSettings() }));
@@ -343,11 +384,10 @@ router.put('/settings', async (req, res) => {
     let value = req.body[key];
     if (NUMERIC.includes(key)) {
       value = Math.min(key === 'referral_percent' ? 100 : 1_000_000, Math.max(0, int(value)));
-    } else if (key === 'auto_approve_offers' || key === 'maintenance') {
+    } else if (key === 'maintenance') {
       value = bool(value);
     } else {
       value = str(value, 500);
-      if (key === 'postback_secret' && value.length < 12) return bad(res, 'Postback secret must be at least 12 characters.');
     }
     updates.push([key, value]);
   }

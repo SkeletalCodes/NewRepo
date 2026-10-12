@@ -392,6 +392,23 @@ a.press[data-reveal].in:hover, .press.click[data-reveal].in:hover { transform: t
 .skel::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(234, 200, 55, .05), transparent); transform: translateX(-100%); animation: sweep 1.3s infinite; }
 @keyframes sweep { to { transform: translateX(100%); } }
 
+/* embedded offerwall */
+.wall-head { display: flex; align-items: center; gap: 18px; padding: 18px 22px; flex-wrap: wrap; }
+.wall-head h2 { font-size: 24px; color: #fff; }
+.wall-frame { border: 2px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--card); height: max(640px, calc(100vh - 300px)); box-shadow: 5px 5px 0 var(--gold); }
+.wall-frame iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+.wall-launch { padding: 40px 24px; text-align: center; }
+.wall-launch .logo { margin: 0 auto 16px; }
+.wall-launch h3 { font-size: 24px; color: #fff; }
+
+/* admin offerwalls */
+.wall-admin-list { display: grid; gap: 18px; }
+.wall-admin .copy-box .input { font-size: 13px; }
+.steps-list { margin: 12px 0 0 18px; display: grid; gap: 8px; font-size: 14px; }
+.form-sec { border-top: 2px dashed var(--line); padding-top: 18px; margin-top: 18px; }
+.form-sec:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+.field small { font-size: 12px; line-height: 1.5; }
+
 /* cashout */
 .cash-head { display: grid; grid-template-columns: 1.3fr 1fr; gap: 26px; }
 .big-bal { padding: 26px 28px; display: flex; gap: 22px; align-items: center; }

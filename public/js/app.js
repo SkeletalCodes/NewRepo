@@ -257,7 +257,6 @@
   const routes = {
     '': () => (state.user ? go('earn') : renderLanding()),
     earn: pageEarn,
-    offers: pageOffers,
     wall: pageWall,
     cashout: pageCashout,
     leaderboard: pageLeaderboard,
@@ -316,7 +315,7 @@
     <nav class="lnav">${clouds()}
       <div class="lnav-in">
         ${brand()}
-        <div class="lnav-links"><a href="#how">How it works</a><a href="#payouts">Payouts</a><a href="#/offers">Offers</a><a href="#/leaderboard">Leaderboard</a><a href="#faq">FAQ</a></div>
+        <div class="lnav-links"><a href="#how">How it works</a><a href="#payouts">Payouts</a><a href="#/earn">Offerwalls</a><a href="#/leaderboard">Leaderboard</a><a href="#faq">FAQ</a></div>
         <div class="spacer"></div>
         <button class="btn" data-act="login">Log in</button>
         <button class="btn btn-gold" data-act="register">Sign up</button>
@@ -331,7 +330,7 @@
           <p class="lead">Play games, answer surveys and try apps. We pay you in real dollars, and you cash out in crypto, prepaid cards or gift cards.</p>
           <div class="hero-cta">
             <button class="btn btn-gold btn-lg" data-act="register">Create free account</button>
-            <a href="#/offers" class="btn btn-lg">See the offers <i class="fa-solid fa-arrow-right"></i></a>
+            <a href="#/earn" class="btn btn-lg">Browse offerwalls <i class="fa-solid fa-arrow-right"></i></a>
           </div>
           <div class="proof">
             <div><b id="st-users">0</b><span>Members</span></div>
@@ -394,7 +393,7 @@
 
     <footer class="footer"><div class="wrap">
       ${brand()}
-      <div class="row wrap" style="gap:22px"><a href="#/offers">Offers</a><a href="#/leaderboard">Leaderboard</a><a href="#" data-act="terms">Terms</a><a href="#" data-act="privacy">Privacy</a></div>
+      <div class="row wrap" style="gap:22px"><a href="#/earn">Offerwalls</a><a href="#/leaderboard">Leaderboard</a><a href="#" data-act="terms">Terms</a><a href="#" data-act="privacy">Privacy</a></div>
       <div>© ${new Date().getFullYear()} ${esc(c.site_name)}</div>
     </div></footer>`;
 
@@ -430,7 +429,11 @@
   function startReceipt() {
     clearInterval(receiptTimer);
     const el = $('#receipt');
-    if (!el || !state.feed.length) return;
+    if (!el) return;
+    if (!state.feed.length) {
+      el.innerHTML = '<div class="empty" style="padding:40px 10px"><i class="fa-solid fa-receipt"></i>Earnings show up here the moment they happen.</div>';
+      return;
+    }
     const row = (f) => `<div class="receipt-row">${avatar(f.username, f.avatar_color)}
       <div style="flex:1;min-width:0"><b style="font-size:14px">${esc(f.username)}</b><div class="faint" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.offer_title)}</div></div>
       <span class="money green">+${money(f.reward)}</span></div>`;
@@ -581,8 +584,8 @@
        <p class="faint" style="font-size:13px;font-weight:600">added to your balance</p>`,
       () => `<h2 style="margin-top:0">How you earn</h2>
        <div class="ob-steps">
-         <div><i class="fa-solid fa-fire"></i><span><b>Featured offers</b><br><small class="muted">Our best-paying games and apps, picked by hand.</small></span></div>
-         <div><i class="fa-solid fa-layer-group"></i><span><b>Offerwalls</b><br><small class="muted">Hundreds more tasks from our partners.</small></span></div>
+         <div><i class="fa-solid fa-layer-group"></i><span><b>Offerwalls</b><br><small class="muted">Games, apps and surveys from our partner networks. Pick one and go.</small></span></div>
+         <div><i class="fa-solid fa-bolt"></i><span><b>Paid automatically</b><br><small class="muted">When the network confirms an offer, the money lands in your balance.</small></span></div>
          <div><i class="fa-solid fa-calendar-check"></i><span><b>Daily bonus</b><br><small class="muted">${money(c.daily_reward)} free, every 24 hours.</small></span></div>
          <div><i class="fa-solid fa-user-group"></i><span><b>Invite friends</b><br><small class="muted">Get ${fmt(c.referral_percent)}% of everything they earn.</small></span></div>
        </div>`,
@@ -637,9 +640,9 @@
           <div class="nav-label">Admin</div>
           ${navItem('admin', 'fa-chart-column', 'Overview')}
           ${navItem('admin/users', 'fa-users', 'Users')}
-          ${navItem('admin/offers', 'fa-bullseye', 'Offers')}
           ${navItem('admin/walls', 'fa-layer-group', 'Offerwalls')}
-          ${navItem('admin/completions', 'fa-circle-check', 'Completions')}
+          ${navItem('admin/logs', 'fa-tower-broadcast', 'Postback log')}
+          ${navItem('admin/completions', 'fa-circle-check', 'Conversions')}
           ${navItem('admin/withdrawals', 'fa-money-bill-transfer', 'Cashouts')}
           ${navItem('admin/methods', 'fa-wallet', 'Payout methods')}
           ${navItem('admin/promos', 'fa-ticket', 'Promo codes')}
@@ -650,7 +653,6 @@
         ` : `
           <div class="nav-label">Earn</div>
           ${navItem('earn', 'fa-house', 'Home')}
-          ${navItem('offers', 'fa-bullseye', 'All offers')}
           ${navItem('leaderboard', 'fa-trophy', 'Leaderboard')}
           <div class="nav-label">Account</div>
           ${navItem('cashout', 'fa-money-bill-wave', 'Cash out')}
@@ -724,102 +726,7 @@
     document.body.appendChild(dd);
   };
 
-  /* ================================================================ offers */
-
-  const DEVICE = {
-    android: ['fa-brands fa-android', 'Android'],
-    ios: ['fa-brands fa-apple', 'iOS'],
-    desktop: ['fa-solid fa-desktop', 'Desktop'],
-    all: ['fa-solid fa-globe', 'Any device'],
-  };
-
-  const offerIcon = (o) => `<span class="o-icon">${icon(o.icon)}</span>`;
-
-  function offerCard(o) {
-    const [dIcon, dLabel] = DEVICE[o.device] || DEVICE.all;
-    const status = o.user_status === 'completed' ? '<span class="badge b-green"><i class="fa-solid fa-check"></i> Done</span>'
-      : o.user_status === 'pending' ? '<span class="badge b-gold">Pending</span>' : '';
-    return `<div class="offer press click ${o.user_status === 'completed' && !o.repeatable ? 'done' : ''}" style="--c:${safeColor(o.color)}" data-offer="${o.id}" data-reveal>
-      ${o.featured ? '<span class="hot">Hot</span>' : ''}
-      <div class="o-head">${offerIcon(o)}<div style="min-width:0"><div class="o-title">${esc(o.title)}</div><div class="o-prov">${esc(o.provider || 'Featured')}</div></div></div>
-      <div class="o-foot"><span class="o-pay">${money(o.payout)}</span>
-        ${status || `<span class="o-meta" title="${dLabel}"><i class="${dIcon}"></i><span><i class="fa-regular fa-clock"></i> ${duration(o.est_minutes)}</span></span>`}</div>
-    </div>`;
-  }
-
-  function bindOffers(offers, root = document) {
-    const map = new Map(offers.map((o) => [String(o.id), o]));
-    $$('[data-offer]', root).forEach((el) => el.addEventListener('click', () => openOffer(map.get(el.dataset.offer))));
-  }
-
-  function openOffer(o) {
-    if (!o) return;
-    const [dIcon, dLabel] = DEVICE[o.device] || DEVICE.all;
-    const done = o.user_status === 'completed' && !o.repeatable;
-    const pending = o.user_status === 'pending';
-    openModal(`<div class="modal-body">
-        <div class="om-top" style="--c:${safeColor(o.color)}">${offerIcon(o)}
-          <div><h2 style="font-size:24px;color:#fff">${esc(o.title)}</h2>
-          <div class="faint mt-8" style="font-size:13px;font-weight:600">via ${esc(o.provider || 'Featured')} ${o.bonus_percent ? `<span class="badge b-green">+${o.bonus_percent}% bonus</span>` : ''}</div></div>
-        </div>
-        <p class="muted mt-16">${esc(o.description)}</p>
-        <div class="facts">
-          <div><small>You earn</small><b class="gold">${money(o.payout)}</b></div>
-          <div><small>Takes about</small><b>${duration(o.est_minutes)}</b></div>
-          <div><small>Device</small><b><i class="${dIcon}" style="font-size:16px"></i> ${dLabel}</b></div>
-        </div>
-        ${o.requirements ? `<div class="req"><b>What you need to do</b>${esc(o.requirements)}</div>` : ''}
-        <div class="mt-24" id="offer-action">
-          ${done ? '<button class="btn btn-block btn-lg" disabled><i class="fa-solid fa-check"></i> Already completed</button>'
-            : pending ? '<button class="btn btn-block btn-lg" disabled><i class="fa-regular fa-clock"></i> Waiting for review</button>'
-            : `<button class="btn btn-gold btn-block btn-lg" id="start-offer">Start offer · earn ${money(o.payout)}</button>`}
-        </div>
-        <p class="demo-note">Demo offer: completion is simulated. Connect a real offerwall with the postback URL in Admin → Settings.</p>
-      </div>`, { cls: 'wide' });
-
-    const btn = $('#start-offer');
-    if (!btn) return;
-    btn.addEventListener('click', async () => {
-      if (!requireAuth('register')) return;
-      const box = $('#offer-action');
-      box.innerHTML = `<div class="tracking">
-        <div class="row" style="justify-content:center;gap:10px"><i class="fa-solid fa-circle-notch spin gold"></i><b>Checking with ${esc(o.provider || 'the advertiser')}…</b></div>
-        <div class="bar mt-16"><div id="track-bar"></div></div>
-        <div class="steps-line"><span class="on" data-s="0">Opened</span><span data-s="1">Tracked</span><span data-s="2">Verified</span></div></div>`;
-      const bar = $('#track-bar');
-      bar.style.transition = 'width 2.1s cubic-bezier(.3,.6,.4,1)';
-      requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = '100%'; }));
-      setTimeout(() => $('[data-s="1"]') && $('[data-s="1"]').classList.add('on'), 800);
-      setTimeout(() => $('[data-s="2"]') && $('[data-s="2"]').classList.add('on'), 1600);
-      await new Promise((r) => setTimeout(r, 2200));
-      try {
-        const r = await api(`/offers/${o.id}/complete`, { body: {} });
-        o.user_status = r.status;
-        if (r.status === 'completed') {
-          box.innerHTML = `<div class="result">${coin('fast')}<h3 class="mt-16" style="font-size:22px">Offer complete</h3>
-            <div class="money green mt-8" style="font-size:30px" id="won">+$0.00</div></div>`;
-          countTo($('#won'), r.reward, (v) => `+${money(v)}`, 900);
-          creditFx($('.result .coin'), r.user, 12);
-          toast(`${money(r.reward)} added to your balance.`, 'success');
-        } else {
-          setUser(r.user);
-          box.innerHTML = `<div class="result"><i class="fa-regular fa-clock gold" style="font-size:36px"></i><h3 class="mt-16" style="font-size:22px">Sent for review</h3>
-            <p class="muted mt-8">${money(r.reward)} will be added once it's approved.</p></div>`;
-          toast('Offer submitted for review.', 'info');
-        }
-        loadFeed();
-        const card = $(`.content [data-offer="${o.id}"]`);
-        if (card) {
-          card.outerHTML = offerCard(o);
-          const fresh = $(`.content [data-offer="${o.id}"]`);
-          fresh.classList.add('in');
-          fresh.addEventListener('click', () => openOffer(o));
-        }
-      } catch (err) {
-        box.innerHTML = `<div class="form-error">${esc(err.message)}</div>`;
-      }
-    });
-  }
+  /* ============================================================== earning */
 
   function canDaily() {
     return state.user && Date.now() - (Number(state.user.last_daily_at) || 0) >= 86400000;
@@ -833,6 +740,13 @@
   const skels = (n, h = 150) => `<div class="skel" style="min-height:${h}px"></div>`.repeat(n);
   const emptyHTML = (msg, ic = 'fa-magnifying-glass') => `<div class="empty"><i class="fa-solid ${ic}"></i>${esc(msg)}</div>`;
 
+  function noWallsHTML() {
+    const admin = state.user && state.user.role === 'admin';
+    return `<div class="empty"><i class="fa-solid fa-layer-group"></i>${admin
+      ? 'No offerwalls are live yet. <a href="#/admin/walls" class="gold">Add one in the admin panel</a>.'
+      : 'Offerwalls are on their way. Check back soon.'}</div>`;
+  }
+
   async function pageEarn() {
     const u = state.user;
     const c = state.config;
@@ -842,7 +756,7 @@
           <span class="coin-deco">${coin()}</span>
           <span class="label"><i class="fa-solid fa-hand"></i> Hey ${esc(u.username)}</span>
           <h2 class="mt-8">${u.balance >= c.min_withdraw ? `You have ${money(u.balance)} ready to cash out.` : `${money(c.min_withdraw - u.balance)} to go until your first cashout.`}</h2>
-          <p>Pick any offer below. Most games pay out after you reach a level, and surveys pay right away.</p>
+          <p>Open any offerwall below and complete an offer. Rewards land in your balance as soon as the network confirms them.</p>
           <div class="bar mt-24" style="max-width:440px"><div data-w="${pct(u.balance, c.min_withdraw)}"></div></div>
           <div class="bar-meta" style="max-width:440px"><span>${money(u.balance)}</span><span>${money(c.min_withdraw)} minimum</span></div>
         </div>
@@ -860,14 +774,8 @@
         <p>Then cash out in crypto or gift cards from ${moneyShort(c.min_withdraw)}.</p>
         <button class="btn btn-gold btn-lg mt-24" data-act="register">Create free account</button></div>`}
 
-      <div class="sec-title"><i class="fa-solid fa-fire"></i> Featured offers <span class="spacer"></span><a href="#/offers">View all <i class="fa-solid fa-arrow-right"></i></a></div>
-      <div class="offer-grid" id="featured">${skels(4)}</div>
-
       <div class="sec-title"><i class="fa-solid fa-layer-group"></i> Offerwalls</div>
-      <div class="wall-grid" id="walls">${skels(6, 170)}</div>
-
-      <div class="sec-title"><i class="fa-solid fa-stopwatch"></i> Quick tasks <span class="faint" style="font-family:Inter,sans-serif;font-size:14px;font-weight:600">15 minutes or less</span></div>
-      <div class="offer-grid" id="quick-tasks">${skels(4)}</div>
+      <div class="wall-grid" id="walls">${skels(4, 180)}</div>
     `);
 
     const pf = $('#promo-f');
@@ -887,14 +795,11 @@
     });
 
     try {
-      const [{ offers }, { offerwalls }] = await Promise.all([api('/offers'), api('/offerwalls')]);
-      const featured = offers.filter((o) => o.featured);
-      const quick = offers.filter((o) => o.est_minutes <= 15).sort((a, b) => a.est_minutes - b.est_minutes);
-      const fill = (id, html) => { const el = $(id); if (el) { el.innerHTML = html; reveal(el); } };
-      fill('#featured', featured.map(offerCard).join('') || emptyHTML('No featured offers right now.'));
-      fill('#quick-tasks', quick.slice(0, 8).map(offerCard).join('') || emptyHTML('No quick tasks right now.'));
-      fill('#walls', offerwalls.map(wallCard).join('') || emptyHTML('No offerwalls yet.'));
-      if ($('#content')) bindOffers(offers, $('#content'));
+      const { offerwalls } = await api('/offerwalls');
+      const el = $('#walls');
+      if (!el) return;
+      el.innerHTML = offerwalls.map(wallCard).join('') || noWallsHTML();
+      reveal(el);
     } catch (err) { toast(err.message, 'error'); }
   }
 
@@ -918,56 +823,35 @@
     return `<a href="#/wall/${encodeURIComponent(w.slug)}" class="wall press" style="--c:${safeColor(w.color)}" data-reveal>
       ${w.bonus_percent ? `<span class="bonus">+${w.bonus_percent}%</span>` : ''}
       ${logo(w.icon, w.color, 'lg')}<h4>${esc(w.name)}</h4><p>${esc(w.tagline)}</p>
-      <div class="meta">${fmt(w.offer_count)} offers</div></a>`;
-  }
-
-  const CATEGORIES = [['all', 'fa-border-all', 'All'], ['game', 'fa-gamepad', 'Games'], ['app', 'fa-mobile-screen-button', 'Apps'], ['survey', 'fa-clipboard-list', 'Surveys'],
-    ['signup', 'fa-pen-to-square', 'Sign-ups'], ['shopping', 'fa-bag-shopping', 'Shopping'], ['video', 'fa-circle-play', 'Videos']];
-
-  async function pageOffers() {
-    const cat = state.route[1] || 'all';
-    page(`<div class="page-head"><div><h1>All offers</h1><p>Pick one, follow the steps, get paid.</p></div>
-        <div class="input-icon" style="width:min(100%,300px)"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="offer-search" placeholder="Search offers"></div></div>
-      <div class="chips">${CATEGORIES.map(([k, ic, l]) => `<a href="#/offers/${k}" class="chip ${cat === k ? 'active' : ''}"><i class="fa-solid ${ic}"></i>${l}</a>`).join('')}</div>
-      <div class="row mt-24"><span class="faint" style="font-weight:600" id="offer-count"></span><span class="spacer"></span>
-        <select class="input" id="offer-sort" style="width:auto"><option value="reward">Highest pay</option><option value="time">Fastest</option><option value="popular">Most popular</option></select></div>
-      <div class="offer-grid mt-24" id="offers">${skels(8)}</div>`);
-    try {
-      const { offers } = await api(`/offers?category=${encodeURIComponent(cat)}`);
-      const draw = () => {
-        const q = $('#offer-search').value.toLowerCase();
-        const sort = $('#offer-sort').value;
-        const list = offers.filter((o) => !q || o.title.toLowerCase().includes(q) || (o.provider || '').toLowerCase().includes(q));
-        list.sort((a, b) => (sort === 'time' ? a.est_minutes - b.est_minutes : sort === 'popular' ? b.completions - a.completions : b.payout - a.payout));
-        $('#offer-count').textContent = `${list.length} offer${list.length === 1 ? '' : 's'}`;
-        const el = $('#offers');
-        el.innerHTML = list.map(offerCard).join('') || emptyHTML('Nothing matches that search.');
-        reveal(el);
-        bindOffers(list, el);
-      };
-      $('#offer-search').addEventListener('input', draw);
-      $('#offer-sort').addEventListener('change', draw);
-      draw();
-    } catch (err) { toast(err.message, 'error'); }
+      <div class="meta">Open wall <i class="fa-solid fa-arrow-right"></i></div></a>`;
   }
 
   async function pageWall() {
     const slug = state.route[1];
-    page(skels(1, 160));
+    if (!state.user) { go('earn'); setTimeout(() => openAuth('register'), 50); return; }
+    page(skels(1, 520));
     try {
-      const [{ offerwalls }, { offers }] = await Promise.all([api('/offerwalls'), api(`/offers?wall=${encodeURIComponent(slug)}`)]);
+      const [{ offerwalls }, launch] = await Promise.all([api('/offerwalls'), api(`/offerwalls/${encodeURIComponent(slug)}/launch`)]);
       const w = offerwalls.find((x) => x.slug === slug);
       if (!w) { setContent(emptyHTML('That offerwall could not be found.')); return; }
-      setContent(`<a href="#/earn" class="muted" style="font-weight:600"><i class="fa-solid fa-arrow-left"></i> Back</a>
-        <div class="press quiet hello-main mt-16" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
-          ${logo(w.icon, w.color, 'xl')}
-          <div style="flex:1"><h2>${esc(w.name)}</h2><p>${esc(w.tagline)}</p></div>
-          ${w.bonus_percent ? `<span class="sticker"><i class="fa-solid fa-arrow-trend-up"></i> +${w.bonus_percent}% on every offer</span>` : ''}
+      const safeUrl = /^https:\/\//i.test(launch.url) ? launch.url : '';
+      setContent(`<a href="#/earn" class="muted" style="font-weight:600"><i class="fa-solid fa-arrow-left"></i> All offerwalls</a>
+        <div class="press quiet wall-head mt-16">
+          ${logo(w.icon, w.color, 'lg')}
+          <div style="flex:1;min-width:180px"><h2>${esc(w.name)}</h2><p class="muted">${esc(w.tagline)}</p></div>
+          ${w.bonus_percent ? `<span class="sticker"><i class="fa-solid fa-arrow-trend-up"></i> +${w.bonus_percent}% bonus</span>` : ''}
+          <a class="btn btn-sm" href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-up-right-from-square"></i> New tab</a>
         </div>
-        <div class="sec-title">${fmt(offers.length)} offers</div>
-        <div class="offer-grid">${offers.map(offerCard).join('') || emptyHTML('No offers here yet. Check back soon.')}</div>`);
-      bindOffers(offers, $('#content'));
-    } catch (err) { toast(err.message, 'error'); }
+        <p class="faint mt-16" style="font-size:13px;font-weight:600"><i class="fa-solid fa-circle-info gold"></i>
+          Rewards are added automatically once ${esc(w.name)} confirms the offer${w.hold_hours ? `, then held for ${w.hold_hours} hour${w.hold_hours === 1 ? '' : 's'} before they're spendable` : ''}. Turn off ad blockers and VPNs so offers track.</p>
+        ${launch.open_mode === 'tab' ? `<div class="press quiet wall-launch mt-16">${logo(w.icon, w.color, 'xl')}
+            <h3>${esc(w.name)} opens in a new tab</h3><p class="muted">Complete offers there, then come back here to see your balance go up.</p>
+            <a class="btn btn-gold btn-lg mt-16" href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer">Open ${esc(w.name)} <i class="fa-solid fa-up-right-from-square"></i></a></div>`
+    : `<div class="wall-frame mt-16"><iframe src="${esc(safeUrl)}" title="${esc(w.name)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox" allow="clipboard-write"></iframe></div>`}`);
+    } catch (err) {
+      setContent(emptyHTML(err.message, 'fa-triangle-exclamation'));
+    }
   }
 
   /* =============================================================== cashout */
@@ -1124,7 +1008,7 @@
         <div class="row" style="gap:34px"><div><div class="label">Balance</div><div class="money" style="font-size:24px">${money(u.balance)}</div></div>
         <div><div class="label">Earned</div><div class="money green" style="font-size:24px">${money(u.total_earned)}</div></div></div>
       </div>
-      <div class="tabs mt-32">${[['activity', 'Activity'], ['offers', 'Offers'], ['cashouts', 'Cashouts'], ['settings', 'Settings']].map(([k, l]) => `<a href="#/profile/${k}" class="tab ${tab === k ? 'active' : ''}">${l}</a>`).join('')}</div>
+      <div class="tabs mt-32">${[['activity', 'Activity'], ['offers', 'Earnings'], ['cashouts', 'Cashouts'], ['settings', 'Settings']].map(([k, l]) => `<a href="#/profile/${k}" class="tab ${tab === k ? 'active' : ''}">${l}</a>`).join('')}</div>
       <div class="mt-24" id="profile-tab">${skels(1, 200)}</div>`);
 
     const out = $('#profile-tab');
@@ -1151,8 +1035,8 @@
           </tbody></table></div>` : emptyHTML('Nothing here yet.');
       } else if (tab === 'offers') {
         out.innerHTML = h.completions.length ? `<div class="table-wrap"><table><thead><tr><th>Offer</th><th>From</th><th>Pays</th><th>Status</th><th>When</th></tr></thead><tbody>
-          ${h.completions.map((c) => `<tr><td><b>${esc(c.offer_title)}</b></td><td class="faint">${esc(c.provider)}</td><td class="money">${money(c.reward)}</td><td><span class="badge st-${esc(c.status)}">${esc(c.status)}</span></td><td class="faint">${dateTime(c.created_at)}</td></tr>`).join('')}
-          </tbody></table></div>` : emptyHTML("You haven't done any offers yet.", 'fa-bullseye');
+          ${h.completions.map((c) => `<tr><td><b>${esc(c.offer_title)}</b></td><td class="faint">${esc(c.provider)}</td><td class="money">${money(c.reward)}</td><td><span class="badge st-${esc(c.status)}">${c.status === 'pending' ? 'on hold' : esc(c.status)}</span>${c.status === 'pending' && c.release_at ? `<div class="faint" style="font-size:12px">until ${esc(dateTime(c.release_at))}</div>` : ''}</td><td class="faint">${dateTime(c.created_at)}</td></tr>`).join('')}
+          </tbody></table></div>` : emptyHTML("You haven't earned from any offerwalls yet.", 'fa-layer-group');
       } else {
         out.innerHTML = h.withdrawals.length ? `<div class="table-wrap"><table><thead><tr><th>Method</th><th>Amount</th><th>Sent to</th><th>Status</th><th>When</th></tr></thead><tbody>
           ${h.withdrawals.map((w) => `<tr><td><b>${esc(w.method_name)}</b></td><td class="money">${money(w.coins)}</td><td class="mono faint">${esc(w.destination)}</td><td><span class="badge st-${esc(w.status)}">${esc(w.status)}</span></td><td class="faint">${dateTime(w.created_at)}</td></tr>`).join('')}
@@ -1166,8 +1050,8 @@
   const adminPages = {
     '': adminOverview,
     users: adminUsers,
-    offers: adminOffers,
     walls: adminWalls,
+    logs: adminLogs,
     completions: adminCompletions,
     withdrawals: adminWithdrawals,
     methods: adminMethods,
@@ -1198,11 +1082,13 @@
       <div class="stat-grid">
         ${stat('fa-users', 'Users', `<span data-count="${o.users}" data-fmt="n">0</span>`, 'users', `+${fmt(o.users_today)} today`)}
         ${stat('fa-circle-check', 'Offers completed', `<span data-count="${o.offers_completed}" data-fmt="n">0</span>`, 'completions')}
-        ${stat('fa-hourglass-half', 'Waiting for review', fmt(o.pending_completions), 'completions')}
+        ${stat('fa-hourglass-half', 'On hold', money(o.held_cents), 'completions', `${fmt(o.pending_completions)} conversions`)}
         ${stat('fa-money-bill-transfer', 'Pending cashouts', fmt(o.pending_withdrawals), 'withdrawals', `$${o.pending_withdrawals_usd.toFixed(2)}`)}
         ${stat('fa-sack-dollar', 'Paid out', `$${o.paid_usd.toFixed(2)}`, 'withdrawals/paid')}
         ${stat('fa-scale-balanced', 'Owed to users', money(o.total_balance), 'users')}
-        ${stat('fa-bullseye', 'Active offers', fmt(o.active_offers), 'offers')}
+        ${stat('fa-chart-line', 'Revenue reported', money(o.revenue_cents), 'walls', `${money(o.paid_to_users_cents)} paid to users`)}
+        ${stat('fa-layer-group', 'Live offerwalls', fmt(o.active_walls), 'walls')}
+        ${stat('fa-tower-broadcast', 'Postbacks today', fmt(o.postbacks_today), 'logs', o.rejected_today ? `<span class="red">${fmt(o.rejected_today)} rejected</span>` : 'none rejected')}
       </div>
       <div class="two mt-32">
         <div class="panel" data-reveal><h3>Signups, last 14 days</h3>${chart(o.signups, '', fmt)}</div>
@@ -1281,99 +1167,199 @@
     });
   }
 
-  async function adminOffers() {
-    const [{ offers }, { offerwalls }] = await Promise.all([api('/admin/offers'), api('/admin/offerwalls')]);
-    setContent(`${adminHead('Offers', 'The demo offers shown to users.', '<button class="btn btn-gold" id="new-offer"><i class="fa-solid fa-plus"></i> New offer</button>')}
-      <div class="table-wrap"><table><thead><tr><th></th><th>Offer</th><th>Wall</th><th>Category</th><th>Pays</th><th>Done</th><th>Flags</th><th></th></tr></thead><tbody>
-      ${offers.map((o) => `<tr><td>${logo(o.icon, o.color)}</td><td><b>${esc(o.title)}</b><div class="faint" style="font-size:12px">${esc(o.device)} · ${duration(o.est_minutes)}</div></td>
-        <td class="faint">${esc(o.provider || '—')}</td><td><span class="badge b-gray">${esc(o.category)}</span></td><td class="money">${money(o.reward)}</td><td>${fmt(o.completions)}</td>
-        <td>${o.active ? '<span class="badge b-green">Live</span>' : '<span class="badge b-red">Hidden</span>'} ${o.featured ? '<span class="badge b-gold">Featured</span>' : ''} ${o.repeatable ? '<span class="badge b-gray">Repeatable</span>' : ''}</td>
-        <td><div class="row" style="gap:6px"><button class="btn btn-sm" data-edit="${o.id}">Edit</button><button class="btn btn-sm btn-danger" data-del="${o.id}" aria-label="Delete"><i class="fa-solid fa-trash"></i></button></div></td></tr>`).join('') || `<tr><td colspan="8">${emptyHTML('No offers yet.')}</td></tr>`}
-      </tbody></table></div>`);
-    $('#new-offer').addEventListener('click', () => offerForm(null, offerwalls));
-    $$('[data-edit]').forEach((b) => b.addEventListener('click', () => offerForm(offers.find((o) => String(o.id) === b.dataset.edit), offerwalls)));
-    $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-      if (!(await confirmModal('Delete offer?', 'Past completions are kept.', 'Delete', true))) return;
-      await api(`/admin/offers/${b.dataset.del}`, { method: 'DELETE' });
-      toast('Offer deleted.', 'success');
-      adminOffers();
-    }));
-  }
-
-  function offerForm(o, walls) {
-    o = o || { title: '', description: '', requirements: '', offerwall_id: walls[0] ? walls[0].id : '', category: 'game', reward: 100, icon: 'fa-gamepad', color: '#eac837', device: 'all', est_minutes: 10, url: '', featured: 0, repeatable: 0, active: 1 };
-    const opt = (list, val) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(l)}</option>`).join('');
-    openModal(`<div class="modal-body"><div class="modal-head"><h2>${o.id ? 'Edit offer' : 'New offer'}</h2></div>
-      <form id="of-f"><div id="of-err"></div>
-        <div class="field"><label>Title</label><input class="input" name="title" value="${esc(o.title)}" required></div>
-        <div class="field"><label>Description</label><textarea class="input" name="description">${esc(o.description)}</textarea></div>
-        <div class="field"><label>Requirements</label><textarea class="input" name="requirements">${esc(o.requirements)}</textarea></div>
-        <div class="grid-2">
-          <div class="field"><label>Offerwall</label><select class="input" name="offerwall_id"><option value="">None</option>${opt(walls.map((w) => [w.id, w.name]), o.offerwall_id)}</select></div>
-          <div class="field"><label>Category</label><select class="input" name="category">${opt(CATEGORIES.slice(1).map(([k, , l]) => [k, l]), o.category)}</select></div>
-          <div class="field"><label>Pays (USD)</label><div class="input-icon"><i class="fa-solid fa-dollar-sign"></i><input class="input" type="number" min="0.01" step="0.01" name="reward" value="${dollars(o.reward)}"></div></div>
-          <div class="field"><label>Est. minutes</label><input class="input" type="number" min="1" name="est_minutes" value="${esc(o.est_minutes)}"></div>
-          <div class="field"><label>Device</label><select class="input" name="device">${opt([['all', 'Any'], ['android', 'Android'], ['ios', 'iOS'], ['desktop', 'Desktop']], o.device)}</select></div>
-          <div class="field"><label>Color</label><div class="color-input"><input type="color" name="color" value="${safeColor(o.color)}"></div></div>
-        </div>
-        <div class="field"><label>Icon</label><input class="input" name="icon" value="${esc(o.icon)}"><small class="faint">${ICON_HELP}</small></div>
-        <div class="field"><label>Tracking URL (optional)</label><input class="input" name="url" value="${esc(o.url)}" placeholder="https://"></div>
-        <div class="row wrap" style="gap:22px;margin:6px 0 18px">
-          <label class="check"><input type="checkbox" name="active" ${o.active ? 'checked' : ''}> Live</label>
-          <label class="check"><input type="checkbox" name="featured" ${o.featured ? 'checked' : ''}> Featured</label>
-          <label class="check"><input type="checkbox" name="repeatable" ${o.repeatable ? 'checked' : ''}> Repeatable</label>
-        </div>
-        <button class="btn btn-gold btn-block">${o.id ? 'Save changes' : 'Create offer'}</button></form></div>`, { cls: 'wide' });
-    $('#of-f').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const body = formData(e.target);
-      body.reward = toCents(body.reward);
-      try {
-        await api(o.id ? `/admin/offers/${o.id}` : '/admin/offers', { method: o.id ? 'PUT' : 'POST', body });
-        closeModal();
-        toast('Offer saved.', 'success');
-        adminOffers();
-      } catch (err) { $('#of-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
-    });
+  function postbackUrl(w, presets) {
+    const macros = (presets && presets[w.preset] && presets[w.preset].macros) || {};
+    const q = [
+      [w.p_user, macros.user || '{USER_ID}'],
+      [w.p_txid, macros.txid || '{TRANSACTION_ID}'],
+      w.amount_source === 'payout' ? [w.p_payout, macros.payout || '{PAYOUT_USD}'] : [w.p_reward, macros.reward || (w.amount_unit === 'dollars' ? '{REWARD_DOLLARS}' : '{REWARD_CENTS}')],
+      w.amount_source === 'payout' ? null : [w.p_payout, macros.payout || '{PAYOUT_USD}'],
+      [w.p_status, macros.status || '{STATUS}'],
+      [w.p_offer, macros.offer || '{OFFER_NAME}'],
+      [w.p_ip, macros.ip || '{USER_IP}'],
+      w.sig_method !== 'none' && w.sig_mode === 'template' ? [w.sig_param, macros.sig || '{SIGNATURE}'] : null,
+    ].filter(Boolean).map(([k, v]) => `${k}=${v}`).join('&');
+    return `${location.origin}/api/postback/${w.slug}/${w.postback_token}?${q}`;
   }
 
   async function adminWalls() {
-    const { offerwalls } = await api('/admin/offerwalls');
-    setContent(`${adminHead('Offerwalls', 'Group offers into walls, with optional bonuses.', '<button class="btn btn-gold" id="new-wall"><i class="fa-solid fa-plus"></i> New offerwall</button>')}
-      <div class="table-wrap"><table><thead><tr><th></th><th>Name</th><th>Slug</th><th>Bonus</th><th>Order</th><th>Status</th><th></th></tr></thead><tbody>
-      ${offerwalls.map((w) => `<tr><td>${logo(w.icon, w.color)}</td><td><b>${esc(w.name)}</b><div class="faint" style="font-size:12px">${esc(w.tagline)}</div></td><td class="faint mono">${esc(w.slug)}</td>
-        <td>${w.bonus_percent ? `<span class="badge b-green">+${w.bonus_percent}%</span>` : '—'}</td><td>${w.sort}</td>
-        <td>${w.active ? '<span class="badge b-green">Live</span>' : '<span class="badge b-red">Hidden</span>'}</td>
-        <td><div class="row" style="gap:6px"><button class="btn btn-sm" data-edit="${w.id}">Edit</button><button class="btn btn-sm btn-danger" data-del="${w.id}" aria-label="Delete"><i class="fa-solid fa-trash"></i></button></div></td></tr>`).join('') || `<tr><td colspan="7">${emptyHTML('No offerwalls yet.')}</td></tr>`}
-      </tbody></table></div>`);
-    const form = (w) => {
-      w = w || { name: '', slug: '', tagline: '', color: '#eac837', icon: 'fa-layer-group', bonus_percent: 0, active: 1, sort: offerwalls.length };
-      openModal(`<div class="modal-body"><div class="modal-head"><h2>${w.id ? 'Edit offerwall' : 'New offerwall'}</h2></div>
-        <form id="w-f"><div id="w-err"></div><div class="grid-2">
-          <div class="field"><label>Name</label><input class="input" name="name" value="${esc(w.name)}" required></div>
-          <div class="field"><label>Slug</label><input class="input" name="slug" value="${esc(w.slug)}" placeholder="auto"></div>
-          <div class="field"><label>Bonus %</label><input class="input" type="number" min="0" name="bonus_percent" value="${esc(w.bonus_percent)}"></div>
-          <div class="field"><label>Order</label><input class="input" type="number" name="sort" value="${esc(w.sort)}"></div></div>
-          <div class="field"><label>Tagline</label><input class="input" name="tagline" value="${esc(w.tagline)}"></div>
-          <div class="field"><label>Icon</label><input class="input" name="icon" value="${esc(w.icon)}"><small class="faint">${ICON_HELP}</small></div>
-          <div class="field"><label>Color</label><div class="color-input"><input type="color" name="color" value="${safeColor(w.color)}"></div></div>
-          <label class="check" style="margin-bottom:16px"><input type="checkbox" name="active" ${w.active ? 'checked' : ''}> Live</label>
-          <button class="btn btn-gold btn-block">Save</button></form></div>`);
-      $('#w-f').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        try {
-          await api(w.id ? `/admin/offerwalls/${w.id}` : '/admin/offerwalls', { method: w.id ? 'PUT' : 'POST', body: formData(e.target) });
-          closeModal(); toast('Offerwall saved.', 'success'); adminWalls();
-        } catch (err) { $('#w-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
-      });
-    };
-    $('#new-wall').addEventListener('click', () => form());
-    $$('[data-edit]').forEach((b) => b.addEventListener('click', () => form(offerwalls.find((w) => String(w.id) === b.dataset.edit))));
+    const [{ offerwalls }, { presets, sig_methods: sigMethods }] = await Promise.all([api('/admin/offerwalls'), api('/admin/offerwall-presets')]);
+    setContent(`${adminHead('Offerwalls', 'Connect offerwall networks. Each one gets its own postback URL, and users are paid automatically when the network confirms an offer.',
+      '<button class="btn btn-gold" id="new-wall"><i class="fa-solid fa-plus"></i> Add offerwall</button>')}
+      ${offerwalls.length ? '' : `<div class="panel"><h3>How to connect a network</h3><ol class="muted steps-list">
+        <li>Sign up as a publisher with an offerwall network (CPX Research, BitLabs, AdGem, Torox, Lootably, AyeT Studios…) and add your site there.</li>
+        <li>Click <b>Add offerwall</b>, pick the network, and paste the wall link from their dashboard with <span class="code inline">{user_id}</span> where the user ID goes.</li>
+        <li>Copy the postback URL we give you into the network's dashboard, replacing the <span class="code inline">{CAPS}</span> parts with the network's own macros.</li>
+        <li>Set the network's currency to US cents (100 = $1), or tell us they send dollars, or pay users a % of the payout.</li>
+        <li>Hit <b>Send test</b>, then send a test conversion from the network's dashboard and check the <a href="#/admin/logs" class="gold">postback log</a>.</li></ol></div>`}
+      <div class="wall-admin-list">${offerwalls.map((w) => `<div class="panel wall-admin" data-reveal>
+        <div class="row wrap">
+          ${logo(w.icon, w.color, 'lg')}
+          <div style="flex:1;min-width:180px"><h3 style="font-size:20px">${esc(w.name)} ${w.active ? '<span class="badge b-green">Live</span>' : '<span class="badge b-red">Off</span>'}
+            ${!w.iframe_url ? '<span class="badge b-gold">No wall link</span>' : ''} ${w.sig_method !== 'none' ? `<span class="badge b-gray"><i class="fa-solid fa-signature"></i> ${esc(w.sig_method)}</span>` : ''}
+            ${w.ip_whitelist ? '<span class="badge b-gray"><i class="fa-solid fa-network-wired"></i> IP allowlist</span>' : ''} ${w.hold_hours ? `<span class="badge b-gray"><i class="fa-regular fa-clock"></i> ${w.hold_hours}h hold</span>` : ''}</h3>
+            <div class="faint" style="font-size:13px;font-weight:600">${fmt(w.completed)} completed · ${money(w.paid_cents)} paid to users · ${money(w.revenue_cents)} revenue reported · last postback ${w.last_postback ? dateTime(w.last_postback) : 'never'}</div></div>
+          <div class="row" style="gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm" data-test="${w.id}"><i class="fa-solid fa-vial"></i> Send test</button>
+            <a class="btn btn-sm" href="#/admin/logs/${w.id}"><i class="fa-solid fa-tower-broadcast"></i> Log</a>
+            <button class="btn btn-sm" data-edit="${w.id}">Edit</button>
+            <button class="btn btn-sm btn-danger" data-del="${w.id}" aria-label="Delete"><i class="fa-solid fa-trash"></i></button>
+          </div>
+        </div>
+        <div class="label mt-16"><i class="fa-solid fa-link"></i> Postback URL</div>
+        <div class="copy-box mt-8"><input class="input mono" readonly value="${esc(postbackUrl(w, presets))}"><button class="btn btn-gold" data-copyurl><i class="fa-solid fa-copy"></i></button>
+          <button class="btn" data-token="${w.id}" title="Make a new secret URL. The old one stops working."><i class="fa-solid fa-arrows-rotate"></i></button></div>
+      </div>`).join('')}</div>`);
+
+    $$('[data-copyurl]').forEach((b) => b.addEventListener('click', async () => {
+      const input = b.parentElement.querySelector('input');
+      try { await navigator.clipboard.writeText(input.value); } catch { input.select(); document.execCommand('copy'); }
+      toast('Postback URL copied.', 'success');
+    }));
+    $$('[data-token]').forEach((b) => b.addEventListener('click', async () => {
+      if (!(await confirmModal('New postback URL?', 'The current URL stops working right away. You will need to update it in the network dashboard.', 'Make new URL', true))) return;
+      await api(`/admin/offerwalls/${b.dataset.token}/token`, { body: {} });
+      toast('New postback URL created.', 'success'); adminWalls();
+    }));
+    $$('[data-test]').forEach((b) => b.addEventListener('click', () => withBusy(b, async () => {
+      try {
+        const r = await api(`/admin/offerwalls/${b.dataset.test}/test`, { body: {} });
+        const row = (label, x) => `<div class="row" style="padding:10px 0;border-bottom:1px solid var(--line)"><b style="width:90px">${label}</b>
+          <span class="badge ${['credited', 'held', 'reversed'].includes(x.result) ? 'b-green' : x.result === 'rejected' ? 'b-red' : 'b-gold'}">${esc(x.result)}</span><span class="muted" style="font-size:14px">${esc(x.message)}</span></div>`;
+        openModal(`<div class="modal-body"><div class="modal-head"><h2>Test postback</h2>
+          <p>We sent a signed $1.00 test conversion for your own account, then reversed it, exactly as the network would.</p></div>
+          ${row('Credit', r.credit)}${row('Reversal', r.reversal)}
+          <div class="label mt-16">URL that was used</div><div class="code mt-8">${esc(r.url)}</div>
+          <p class="faint mt-16" style="font-size:13px">This checks your settings here. To check the network side, send a test conversion from their dashboard and watch the postback log.</p></div>`, { cls: 'wide' });
+        adminWalls();
+      } catch (err) { toast(err.message, 'error'); }
+    })));
+    $('#new-wall').addEventListener('click', () => wallForm(null, presets, sigMethods));
+    $$('[data-edit]').forEach((b) => b.addEventListener('click', () => wallForm(offerwalls.find((w) => String(w.id) === b.dataset.edit), presets, sigMethods)));
     $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-      if (!(await confirmModal('Delete offerwall?', 'Its offers are kept, just unassigned.', 'Delete', true))) return;
+      if (!(await confirmModal('Delete offerwall?', 'Its postback URL stops working. Past earnings are kept.', 'Delete', true))) return;
       await api(`/admin/offerwalls/${b.dataset.del}`, { method: 'DELETE' });
       toast('Offerwall deleted.', 'success'); adminWalls();
     }));
+  }
+
+  const WALL_DEFAULTS = {
+    name: '', slug: '', tagline: '', color: '#eac837', icon: 'fa-layer-group', bonus_percent: 0, active: 1, sort: 0, preset: 'custom',
+    iframe_url: '', open_mode: 'iframe', ip_whitelist: '', sig_method: 'none', sig_mode: 'template', sig_template: '', sig_param: 'hash', sig_secret: '',
+    p_user: 'user_id', p_txid: 'txid', p_reward: 'reward', p_payout: 'payout', p_status: 'status', p_offer: 'offer', p_ip: 'ip',
+    amount_source: 'reward', amount_unit: 'cents', revenue_share: 70, reversal_values: '2,reversed,chargeback,rejected', success_response: '1', hold_hours: 0,
+  };
+
+  function wallForm(w, presets, sigMethods) {
+    const isNew = !w;
+    w = { ...WALL_DEFAULTS, ...(w || {}) };
+    const opt = (list, val) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    const input = (name, label, help = '', attrs = '') => `<div class="field"><label>${label}</label><input class="input" name="${name}" value="${esc(w[name])}" ${attrs}>${help ? `<small class="faint">${help}</small>` : ''}</div>`;
+    openModal(`<div class="modal-body"><div class="modal-head"><h2>${isNew ? 'Add offerwall' : `Edit ${esc(w.name)}`}</h2>
+        <p>Settings come from your network's publisher dashboard.</p></div>
+      <form id="w-f"><div id="w-err"></div>
+        <div class="form-sec"><div class="label"><i class="fa-solid fa-plug"></i> Network</div>
+          <div class="grid-2 mt-8">
+            <div class="field"><label>Network</label><select class="input" name="preset">${opt(Object.entries(presets).map(([k, v]) => [k, v.name]), w.preset)}</select>
+              <small class="faint">Fills in typical settings. Always double-check against the network's postback docs.</small></div>
+            ${input('name', 'Name shown to users', '', 'required maxlength="60"')}
+            ${input('tagline', 'Tagline', '', 'maxlength="120"')}
+            ${input('slug', 'Slug', 'Used in URLs. Leave blank to generate it from the name.', 'maxlength="60"')}
+            ${input('icon', 'Icon', 'e.g. <span class="code inline">fa-gem</span> or <span class="code inline">img:/img/your-logo.svg</span>')}
+            <div class="field"><label>Color</label><div class="color-input"><input type="color" name="color" value="${safeColor(w.color)}"></div></div>
+            ${input('bonus_percent', 'Bonus %', 'Extra on top of every reward from this wall.', 'type="number" min="0" max="1000"')}
+            ${input('sort', 'Order', '', 'type="number"')}
+          </div>
+          <label class="check"><input type="checkbox" name="active" ${w.active ? 'checked' : ''}> Live (shown to users and accepting postbacks)</label>
+        </div>
+
+        <div class="form-sec"><div class="label"><i class="fa-solid fa-window-maximize"></i> Wall link</div>
+          ${input('iframe_url', 'Wall URL', 'From the network dashboard. Put <span class="code inline">{user_id}</span> where the user ID goes, e.g. <span class="code inline">https://wall.example.com/?app=123&amp;uid={user_id}</span>', 'placeholder="https://"')}
+          <div class="field"><label>Show it</label><select class="input" name="open_mode">${opt([['iframe', 'Embedded on our site'], ['tab', 'In a new tab (if the network blocks embedding)']], w.open_mode)}</select></div>
+        </div>
+
+        <div class="form-sec"><div class="label"><i class="fa-solid fa-sack-dollar"></i> Rewards</div>
+          <div class="grid-2 mt-8">
+            <div class="field"><label>User's reward comes from</label><select class="input" name="amount_source">${opt([['reward', 'The reward param (currency set in network dashboard)'], ['payout', 'A % of the payout to you']], w.amount_source)}</select></div>
+            <div class="field" data-show="reward"><label>Reward param is in</label><select class="input" name="amount_unit">${opt([['cents', 'Cents (set network currency to 100 per $1)'], ['dollars', 'Dollars']], w.amount_unit)}</select></div>
+            <div class="field" data-show="payout"><label>User gets % of payout</label><input class="input" type="number" min="0" max="100" name="revenue_share" value="${esc(w.revenue_share)}"></div>
+            ${input('hold_hours', 'Hold rewards for (hours)', '0 = credit right away. Holding gives networks time to send chargebacks before users can cash out.', 'type="number" min="0" max="1440"')}
+            ${input('reversal_values', 'Status values that mean "reversed"', 'Comma separated. A negative reward also counts as a reversal.')}
+          </div>
+        </div>
+
+        <div class="form-sec"><div class="label"><i class="fa-solid fa-shield-halved"></i> Security</div>
+          <p class="faint mt-8" style="font-size:13px">The postback URL already contains a secret token. Add an IP allowlist and signature check when the network supports them.</p>
+          ${input('ip_whitelist', 'Allowed IPs', 'Comma separated, from the network docs. A trailing * matches a prefix, like <span class="code inline">203.0.113.*</span>. Leave blank to allow any IP.')}
+          <div class="grid-2">
+            <div class="field"><label>Signature</label><select class="input" name="sig_method">${opt(sigMethods.map((m) => [m, m === 'none' ? 'None' : m.toUpperCase()]), w.sig_method)}</select></div>
+            <div class="field" data-sig><label>Signed data</label><select class="input" name="sig_mode">${opt([['template', 'A template of params (below)'], ['url', 'The full postback URL']], w.sig_mode)}</select></div>
+            <div data-sig data-sigtpl style="grid-column:1/-1">${input('sig_template', 'Template', 'Placeholders: <span class="code inline">{txid}</span> <span class="code inline">{user_id}</span> <span class="code inline">{reward}</span> <span class="code inline">{payout}</span> <span class="code inline">{status}</span> <span class="code inline">{secret}</span>, or any raw param name.')}</div>
+            <div data-sig>${input('sig_param', 'Signature param name')}</div>
+            <div data-sig>${input('sig_secret', 'Secret key', 'From the network dashboard.', 'autocomplete="off"')}</div>
+          </div>
+        </div>
+
+        <details class="form-sec"><summary class="label" style="cursor:pointer"><i class="fa-solid fa-sliders"></i> Advanced: param names & response</summary>
+          <p class="faint mt-8" style="font-size:13px">The names we read from the postback. You only need to change these if the network can't use the names in our URL.</p>
+          <div class="grid-2 mt-8">${input('p_user', 'User ID')}${input('p_txid', 'Transaction ID')}${input('p_reward', 'Reward')}${input('p_payout', 'Payout (USD)')}${input('p_status', 'Status')}${input('p_offer', 'Offer name')}${input('p_ip', 'User IP')}
+            ${input('success_response', 'Reply on success', 'What the network expects back, often 1 or OK.')}</div>
+        </details>
+
+        <button class="btn btn-gold btn-block btn-lg mt-16">${isNew ? 'Add offerwall' : 'Save changes'}</button>
+      </form></div>`, { cls: 'wide' });
+
+    const f = $('#w-f');
+    const sync = () => {
+      const src = f.amount_source.value;
+      $$('[data-show]', f).forEach((el) => { el.style.display = el.dataset.show === src ? '' : 'none'; });
+      const sig = f.sig_method.value !== 'none';
+      $$('[data-sig]', f).forEach((el) => { el.style.display = sig ? '' : 'none'; });
+      $$('[data-sigtpl]', f).forEach((el) => { el.style.display = sig && f.sig_mode.value === 'template' ? '' : 'none'; });
+    };
+    f.preset.addEventListener('change', () => {
+      const p = presets[f.preset.value] || {};
+      const fill = { ...WALL_DEFAULTS, ...p };
+      for (const k of ['name', 'tagline', 'icon', 'sig_method', 'sig_mode', 'sig_template', 'sig_param', 'reversal_values']) {
+        if (f[k] && (k !== 'name' || !f.name.value || Object.values(presets).some((x) => x.name === f.name.value))) f[k].value = fill[k] ?? '';
+      }
+      if (p.color) f.color.value = p.color;
+      sync();
+    });
+    ['amount_source', 'sig_method', 'sig_mode'].forEach((n) => f[n].addEventListener('change', sync));
+    sync();
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api(isNew ? '/admin/offerwalls' : `/admin/offerwalls/${w.id}`, { method: isNew ? 'POST' : 'PUT', body: formData(f) });
+        closeModal(); toast(isNew ? 'Offerwall added. Copy its postback URL into the network dashboard.' : 'Offerwall saved.', 'success'); adminWalls();
+      } catch (err) { $('#w-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; $('#w-err').scrollIntoView({ block: 'center' }); }
+    });
+  }
+
+  async function adminLogs() {
+    const wallId = state.route[2] || '';
+    const result = state.route[3] || '';
+    const [{ offerwalls }, { logs }] = await Promise.all([api('/admin/offerwalls'),
+      api(`/admin/postback-logs?wall=${encodeURIComponent(wallId)}&result=${encodeURIComponent(result)}`)]);
+    const RESULTS = ['credited', 'held', 'reversed', 'duplicate', 'ignored', 'rejected'];
+    const badge = (r) => `<span class="badge ${['credited', 'held', 'reversed'].includes(r) ? 'b-green' : r === 'rejected' ? 'b-red' : 'b-gold'}">${esc(r)}</span>`;
+    setContent(`${adminHead('Postback log', 'Every postback the networks send, and what happened to it. Kept for 30 days.')}
+      <div class="toolbar">
+        <select class="input" id="lg-wall" style="width:auto"><option value="">All offerwalls</option>${offerwalls.map((w) => `<option value="${w.id}" ${String(w.id) === wallId ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>
+        <select class="input" id="lg-res" style="width:auto"><option value="">All results</option>${RESULTS.map((r) => `<option ${r === result ? 'selected' : ''}>${r}</option>`).join('')}</select>
+        <button class="btn btn-sm" id="lg-refresh"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>When</th><th>Wall</th><th>Result</th><th>User</th><th>Amount</th><th>Details</th></tr></thead><tbody>
+      ${logs.map((l) => `<tr><td class="faint nowrap">${dateTime(l.created_at)}</td><td><b>${esc(l.wall_name || '—')}</b></td><td>${badge(l.result)}</td>
+        <td>${l.username ? esc(l.username) : '<span class="faint">—</span>'}</td><td class="money ${l.amount < 0 ? 'red' : ''}">${l.amount === null || l.amount === undefined ? '' : money(l.amount)}</td>
+        <td><div>${esc(l.message)}</div><details><summary class="faint" style="cursor:pointer;font-size:12px">${esc(l.method)} from ${esc(l.ip)}</summary><div class="code mt-8">${esc(l.params)}</div></details></td></tr>`).join('')
+        || `<tr><td colspan="6">${emptyHTML('No postbacks yet. Use "Send test" on an offerwall, or send a test conversion from the network.', 'fa-tower-broadcast')}</td></tr>`}
+      </tbody></table></div>`);
+    const nav = () => go(`admin/logs/${$('#lg-wall').value || '0'}/${$('#lg-res').value}`.replace(/\/$/, ''));
+    $('#lg-wall').addEventListener('change', nav);
+    $('#lg-res').addEventListener('change', nav);
+    $('#lg-refresh').addEventListener('click', () => adminLogs().catch((err) => toast(err.message, 'error')));
   }
 
   function statusTabs(base, current, list) {
@@ -1383,12 +1369,12 @@
   async function adminCompletions() {
     const status = state.route[2] || 'pending';
     const { completions } = await api(`/admin/completions?status=${status === 'all' ? '' : status}`);
-    setContent(`${adminHead('Completions', 'Approve or reject offer completions. Reversing a completed one takes the money back.')}
+    setContent(`${adminHead('Conversions', 'Every reward the networks have reported. Pending ones are on hold: release them early or reject them. Reversing a paid one takes the money back.')}
       ${statusTabs('completions', status, [['pending', 'Pending'], ['completed', 'Completed'], ['rejected', 'Rejected'], ['all', 'All']])}
       <div class="table-wrap"><table><thead><tr><th>ID</th><th>User</th><th>Offer</th><th>Pays</th><th>Status</th><th>When</th><th></th></tr></thead><tbody>
       ${completions.map((c) => `<tr><td class="faint">#${c.id}</td><td><b>${esc(c.username)}</b></td><td>${esc(c.offer_title)}<div class="faint" style="font-size:12px">${esc(c.provider)}${c.txid ? ` · tx ${esc(c.txid)}` : ''}</div></td>
         <td class="money">${money(c.reward)}</td><td><span class="badge st-${esc(c.status)}">${esc(c.status)}</span></td><td class="faint">${dateTime(c.created_at)}</td>
-        <td><div class="row" style="gap:6px">${c.status === 'pending' ? `<button class="btn btn-sm btn-green" data-ok="${c.id}">Approve</button>` : ''}${c.status !== 'rejected' ? `<button class="btn btn-sm btn-danger" data-no="${c.id}">${c.status === 'completed' ? 'Reverse' : 'Reject'}</button>` : ''}</div></td></tr>`).join('') || `<tr><td colspan="7">${emptyHTML('Nothing here.', 'fa-circle-check')}</td></tr>`}
+        <td><div class="row" style="gap:6px">${c.status === 'pending' ? `<button class="btn btn-sm btn-green" data-ok="${c.id}" title="${c.release_at ? `Releases on its own ${esc(dateTime(c.release_at))}` : ''}">Release now</button>` : ''}${c.status !== 'rejected' ? `<button class="btn btn-sm btn-danger" data-no="${c.id}">${c.status === 'completed' ? 'Reverse' : 'Reject'}</button>` : ''}</div></td></tr>`).join('') || `<tr><td colspan="7">${emptyHTML('Nothing here.', 'fa-circle-check')}</td></tr>`}
       </tbody></table></div>`);
     $$('[data-ok]').forEach((b) => b.addEventListener('click', async () => {
       try { await api(`/admin/completions/${b.dataset.ok}/approve`, { body: {} }); toast('Approved and paid.', 'success'); adminCompletions(); } catch (err) { toast(err.message, 'error'); }
@@ -1511,7 +1497,6 @@
       <input class="input" name="${key}" type="${type}" value="${esc(val)}" ${extra}></div>`;
     const toggle = (key, label, help) => `<div class="set-row"><div class="si"><b>${label}</b><small>${help}</small></div>
       <label class="switch"><input type="checkbox" name="${key}" ${s[key] === '1' ? 'checked' : ''}><span></span></label></div>`;
-    const postback = `${location.origin}/api/postback?secret=${encodeURIComponent(s.postback_secret)}&user_id={USER_ID}&offer_id={OFFER_ID}&title={OFFER_NAME}&reward={PAYOUT_IN_CENTS}&txid={TRANSACTION_ID}&provider=NetworkName&status={STATUS}`;
     setContent(`${adminHead('Settings', 'Site-wide options.')}
       <form id="s-f">
         <div class="panel"><h3>General</h3>
@@ -1523,21 +1508,15 @@
           ${row('signup_bonus', 'Sign-up bonus (USD)', 'Added when someone creates an account.', 'number', dollars(s.signup_bonus), 'min="0" step="0.01"')}
           ${row('daily_reward', 'Daily bonus (USD)', 'Users can claim this once every 24 hours.', 'number', dollars(s.daily_reward), 'min="0" step="0.01"')}
           ${row('referral_percent', 'Referral cut (%)', "Share of a referral's offer earnings paid to whoever invited them.", 'number', s.referral_percent, 'min="0" max="100"')}
-          ${toggle('auto_approve_offers', 'Auto-approve demo offers', 'When off, demo offer completions wait for you in Completions.')}
           <p class="faint" style="font-size:13px;margin-top:10px">Cashout minimums are set per method under <a href="#/admin/methods" class="gold">Payout methods</a>.</p>
         </div>
-        <div class="panel mt-24"><h3>Offerwall postback</h3>
-          <p class="muted" style="font-size:14px;margin:6px 0 12px">Give this URL to real offerwall networks so they can pay users automatically. Swap the {PLACEHOLDERS} for your network's macros. The reward is in <b>US cents</b> (250 = $2.50). <b>status=2</b> reverses a payout.</p>
-          <div class="code">${esc(postback)}</div>
-          ${row('postback_secret', 'Postback secret', 'Keep it private. At least 12 characters.')}
-        </div>
+        <p class="faint mt-16" style="font-size:13px">Postback URLs, signatures and hold periods are set per network under <a href="#/admin/walls" class="gold">Offerwalls</a>.</p>
         <button class="btn btn-gold btn-lg mt-24">Save settings</button>
       </form>`);
     $('#s-f').addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = formData(e.target);
       body.maintenance = body.maintenance ? 1 : 0;
-      body.auto_approve_offers = body.auto_approve_offers ? 1 : 0;
       body.signup_bonus = toCents(body.signup_bonus);
       body.daily_reward = toCents(body.daily_reward);
       try {

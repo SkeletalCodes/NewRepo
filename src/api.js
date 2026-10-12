@@ -7,7 +7,6 @@ const {
   hashPassword, verifyPassword, createSession, destroySession,
   requireUser, rateLimit, publicUser,
 } = require('./auth');
-const { approveCompletionInTx } = require('./rewards');
 
 const router = express.Router();
 
@@ -149,64 +148,19 @@ router.post('/me/password', requireUser, authLimiter, async (req, res) => {
 /* ---------------------------------------------------------------- offers */
 
 router.get('/offerwalls', async (_req, res) => {
-  const walls = await db.all(`SELECT w.*, (SELECT COUNT(*) FROM offers o WHERE o.offerwall_id = w.id AND o.active = 1) AS offer_count
-    FROM offerwalls w WHERE w.active = 1 ORDER BY w.sort, w.id`);
+  const walls = await db.all(`SELECT id, name, slug, tagline, color, icon, bonus_percent, open_mode, hold_hours
+    FROM offerwalls WHERE active = 1 AND iframe_url != '' ORDER BY sort, id`);
   res.json({ offerwalls: walls });
 });
 
-router.get('/offers', async (req, res) => {
-  const where = ['o.active = 1'];
-  const params = [];
-  if (req.query.wall) { where.push('w.slug = ?'); params.push(String(req.query.wall)); }
-  if (req.query.category && req.query.category !== 'all') { where.push('o.category = ?'); params.push(String(req.query.category)); }
-  if (req.query.featured) where.push('o.featured = 1');
-  const offers = await db.all(`SELECT o.id, o.title, o.description, o.requirements, o.category, o.reward, o.icon, o.color,
-      o.device, o.est_minutes, o.featured, o.repeatable, o.completions, w.name AS provider, w.slug AS provider_slug,
-      COALESCE(w.bonus_percent, 0) AS bonus_percent
-    FROM offers o LEFT JOIN offerwalls w ON w.id = o.offerwall_id
-    WHERE ${where.join(' AND ')} AND (w.id IS NULL OR w.active = 1)
-    ORDER BY o.featured DESC, o.reward DESC`, ...params);
-
-  const done = new Map();
-  if (req.user) {
-    for (const r of await db.all("SELECT offer_id, status FROM offer_completions WHERE user_id = ? AND status != 'rejected'", req.user.id)) {
-      done.set(r.offer_id, r.status);
-    }
-  }
-  res.json({
-    offers: offers.map((o) => ({
-      ...o,
-      payout: Math.round(o.reward * (1 + o.bonus_percent / 100)),
-      user_status: done.get(o.id) || null,
-    })),
-  });
-});
-
-router.post('/offers/:id/complete', requireUser, actionLimiter, async (req, res) => {
-  const offer = await db.get(`SELECT o.*, w.name AS provider, COALESCE(w.bonus_percent, 0) AS bonus_percent
-    FROM offers o LEFT JOIN offerwalls w ON w.id = o.offerwall_id WHERE o.id = ? AND o.active = 1`, Number(req.params.id) || 0);
-  if (!offer) return bad(res, 'Offer not found.', 404);
-
-  const payout = Math.round(offer.reward * (1 + offer.bonus_percent / 100));
-  const auto = (await getSetting('auto_approve_offers')) === '1';
-  try {
-    const result = await db.tx(async (t) => {
-      const existing = await t.get("SELECT status FROM offer_completions WHERE user_id = ? AND offer_id = ? AND status != 'rejected' ORDER BY id DESC LIMIT 1",
-        req.user.id, offer.id);
-      if (existing && (!offer.repeatable || existing.status === 'pending')) {
-        throw new UserError(existing.status === 'pending' ? 'This offer is already pending review.' : 'You have already completed this offer.');
-      }
-      const now = Date.now();
-      const completion = await t.get(`INSERT INTO offer_completions (user_id, offer_id, offer_title, provider, reward, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING *`, req.user.id, offer.id, offer.title, offer.provider || 'Featured', payout, now, now);
-      if (auto) await approveCompletionInTx(t, completion);
-      return { status: auto ? 'completed' : 'pending', reward: payout };
-    });
-    res.json({ ...result, user: publicUser(await getUser(req.user.id)) });
-  } catch (err) {
-    if (err instanceof UserError) return bad(res, err.message);
-    throw err;
-  }
+/** The wall URL for the logged-in user, with their ID filled in. */
+router.get('/offerwalls/:slug/launch', requireUser, async (req, res) => {
+  const wall = await db.get("SELECT * FROM offerwalls WHERE slug = ? AND active = 1 AND iframe_url != ''", String(req.params.slug));
+  if (!wall) return bad(res, 'Offerwall not found.', 404);
+  const url = wall.iframe_url
+    .replace(/\{user_id\}/g, encodeURIComponent(String(req.user.id)))
+    .replace(/\{username\}/g, encodeURIComponent(req.user.username));
+  res.json({ url, open_mode: wall.open_mode });
 });
 
 /* --------------------------------------------------------------- rewards */

@@ -12,7 +12,6 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const crypto = require('node:crypto');
 
 const PG_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 const IS_PG = !!PG_URL;
@@ -123,8 +122,8 @@ const SCHEMA = [
     name TEXT NOT NULL,
     slug TEXT NOT NULL UNIQUE,
     tagline TEXT NOT NULL DEFAULT '',
-    color TEXT NOT NULL DEFAULT '#7c5cff',
-    icon TEXT NOT NULL DEFAULT '💎',
+    color TEXT NOT NULL DEFAULT '#eac837',
+    icon TEXT NOT NULL DEFAULT 'fa-layer-group',
     bonus_percent INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     sort INTEGER NOT NULL DEFAULT 0
@@ -212,6 +211,19 @@ const SCHEMA = [
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS postback_logs (
+    id ${ID},
+    offerwall_id INTEGER REFERENCES offerwalls(id) ON DELETE CASCADE,
+    ip TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL DEFAULT 'GET',
+    params TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    user_id INTEGER,
+    amount INTEGER,
+    created_at BIGINT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_pb_wall ON postback_logs(offerwall_id, id)',
   'CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at)',
   'CREATE INDEX IF NOT EXISTS idx_oc_user ON offer_completions(user_id)',
@@ -220,12 +232,61 @@ const SCHEMA = [
 ];
 
 // Money settings are in US cents.
+/*
+ * Columns added after the first release. They're added to existing tables on startup if missing,
+ * so the CREATE TABLE statements above stay as they were.
+ */
+const ADDED_COLUMNS = {
+  offerwalls: [
+    // Integration
+    ['preset', "TEXT NOT NULL DEFAULT 'custom'"],
+    ['iframe_url', "TEXT NOT NULL DEFAULT ''"], // {user_id} and {username} are substituted
+    ['open_mode', "TEXT NOT NULL DEFAULT 'iframe'"], // iframe | tab
+    ['postback_token', "TEXT NOT NULL DEFAULT ''"], // secret path segment in the postback URL
+    ['ip_whitelist', "TEXT NOT NULL DEFAULT ''"], // comma separated, empty = any IP
+    // Signature check
+    ['sig_method', "TEXT NOT NULL DEFAULT 'none'"], // none | md5 | sha1 | sha256 | hmac-sha1 | hmac-sha256
+    ['sig_mode', "TEXT NOT NULL DEFAULT 'template'"], // template | url
+    ['sig_template', "TEXT NOT NULL DEFAULT ''"], // e.g. {txid}-{secret}
+    ['sig_param', "TEXT NOT NULL DEFAULT 'hash'"],
+    ['sig_secret', "TEXT NOT NULL DEFAULT ''"],
+    // Postback parameter names
+    ['p_user', "TEXT NOT NULL DEFAULT 'user_id'"],
+    ['p_txid', "TEXT NOT NULL DEFAULT 'txid'"],
+    ['p_reward', "TEXT NOT NULL DEFAULT 'reward'"],
+    ['p_payout', "TEXT NOT NULL DEFAULT 'payout'"],
+    ['p_status', "TEXT NOT NULL DEFAULT 'status'"],
+    ['p_offer', "TEXT NOT NULL DEFAULT 'offer'"],
+    ['p_ip', "TEXT NOT NULL DEFAULT 'ip'"],
+    // How the user's reward is worked out
+    ['amount_source', "TEXT NOT NULL DEFAULT 'reward'"], // reward | payout
+    ['amount_unit', "TEXT NOT NULL DEFAULT 'cents'"], // cents | dollars (for amount_source = reward)
+    ['revenue_share', 'INTEGER NOT NULL DEFAULT 70'], // % of payout given to the user (for amount_source = payout)
+    ['reversal_values', "TEXT NOT NULL DEFAULT '2,reversed,chargeback,rejected'"],
+    ['success_response', "TEXT NOT NULL DEFAULT '1'"],
+    ['hold_hours', 'INTEGER NOT NULL DEFAULT 0'],
+    ['created_at', 'BIGINT NOT NULL DEFAULT 0'],
+  ],
+  offer_completions: [
+    ['offerwall_id', 'INTEGER'],
+    ['payout_cents', 'INTEGER NOT NULL DEFAULT 0'], // revenue the network reported paying us
+    ['ip', "TEXT NOT NULL DEFAULT ''"],
+    ['release_at', 'BIGINT'],
+  ],
+};
+
+async function hasColumn(t, table, column) {
+  if (IS_PG) {
+    return !!(await t.get('SELECT 1 AS x FROM information_schema.columns WHERE table_name = ? AND column_name = ?', table, column));
+  }
+  return !!(await t.get(`SELECT 1 AS x FROM pragma_table_info('${table}') WHERE name = ?`, column));
+}
+
 const DEFAULT_SETTINGS = {
   site_name: 'GoldRush',
   signup_bonus: '25',
   daily_reward: '5',
   referral_percent: '10',
-  auto_approve_offers: '1',
   announcement: 'New here? Use code WELCOME for a free bonus.',
   maintenance: '0',
 };
@@ -235,7 +296,13 @@ async function migrate() {
   await backend.tx(async (t) => {
     if (IS_PG) await t.get('SELECT pg_advisory_xact_lock(727274)');
     for (const stmt of SCHEMA) await t.run(stmt);
-    const defaults = { ...DEFAULT_SETTINGS, postback_secret: crypto.randomBytes(16).toString('hex') };
+    for (const [table, cols] of Object.entries(ADDED_COLUMNS)) {
+      for (const [name, type] of cols) {
+        if (!(await hasColumn(t, table, name))) await t.run(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+      }
+    }
+    await t.run('CREATE INDEX IF NOT EXISTS idx_oc_release ON offer_completions(status, release_at)');
+    const defaults = DEFAULT_SETTINGS;
     for (const [k, v] of Object.entries(defaults)) {
       await t.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING', k, v);
     }
