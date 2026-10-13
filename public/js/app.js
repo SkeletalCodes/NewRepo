@@ -502,11 +502,12 @@
   actions.terms = (e) => {
     e.preventDefault();
     openModal(`<div class="modal-body"><div class="modal-head"><h2>Terms of Service</h2></div><div class="muted" style="display:grid;gap:10px;font-size:14px">
-      <p>1. You must be 13 or older (18+ for some offers) to use ${esc(state.config.site_name)}.</p>
+      <p>1. You must be 18 or older to use ${esc(state.config.site_name)}.</p>
       <p>2. One account per person, household and device. VPNs, proxies, emulators and bots are not allowed.</p>
       <p>3. Rewards are credited by our partners. We may reverse rewards that are charged back or obtained by fraud.</p>
       <p>4. Cashouts are reviewed by hand and may be declined for breaking these terms.</p>
-      <p>5. We may update these terms. Using the site means you accept the latest version.</p></div></div>`);
+      <p>5. Games are played with your real balance and results are final. Only bet what you can afford to lose. If gambling stops being fun, take a break or contact support to close your account.</p>
+      <p>6. We may update these terms. Using the site means you accept the latest version.</p></div></div>`);
   };
   actions.privacy = (e) => {
     e.preventDefault();
@@ -598,7 +599,7 @@
             <div class="field"><label>Password</label><div class="input-icon"><i class="fa-solid fa-lock"></i><input class="input" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters" required><button type="button" class="pw-toggle" aria-label="Show password"><i class="fa-regular fa-eye"></i></button></div>
               <div class="pw-meter"><div id="pw-bar" style="width:0"></div></div></div>
             <div class="field"><label>Referral code <span class="faint">(optional)</span></label><div class="input-icon"><i class="fa-solid fa-ticket"></i><input class="input" name="referral" value="${esc(ref)}" placeholder="e.g. A1B2C3D4"></div></div>
-            <label class="check" style="margin-bottom:18px"><input type="checkbox" name="terms"> <span>I'm 13 or older and agree to the <a href="#" class="gold" data-act="terms">Terms</a> and <a href="#" class="gold" data-act="privacy">Privacy Policy</a>.</span></label>
+            <label class="check" style="margin-bottom:18px"><input type="checkbox" name="terms"> <span>I'm 18 or older and agree to the <a href="#" class="gold" data-act="terms">Terms</a> and <a href="#" class="gold" data-act="privacy">Privacy Policy</a>.</span></label>
             <button class="btn btn-gold btn-block btn-lg" type="submit">Sign up & get ${money(c.signup_bonus)}</button>
             <p class="center muted mt-16" style="font-size:14px">Already have an account? <a href="#" class="gold" data-switch="login">Log in</a></p>
           </form>`;
@@ -797,6 +798,7 @@
           ${navItem('admin/logs', 'fa-tower-broadcast', 'Postback log')}
           ${navItem('admin/completions', 'fa-circle-check', 'Conversions')}
           ${navItem('admin/withdrawals', 'fa-money-bill-transfer', 'Cashouts')}
+          ${navItem('admin/games', 'fa-dice', 'Games')}
           ${navItem('admin/methods', 'fa-wallet', 'Payout methods')}
           ${navItem('admin/promos', 'fa-ticket', 'Promo codes')}
           ${navItem('admin/transactions', 'fa-receipt', 'Transactions')}
@@ -807,7 +809,7 @@
         ` : `
           <div class="nav-label">Earn</div>
           ${navItem('earn', 'fa-house', 'Home')}
-          ${navItem('games', 'fa-gamepad', 'Games', ' <span class="tag soon-tag">SOON</span>')}
+          ${navItem('games', 'fa-gamepad', 'Games', ' <span class="tag soon-tag">NEW</span>')}
           ${navItem('leaderboard', 'fa-trophy', 'Leaderboard')}
           <div class="nav-label">Account</div>
           ${navItem('cashout', 'fa-money-bill-wave', 'Cash out')}
@@ -1015,27 +1017,11 @@
 
   /* ================================================================= games */
 
-  const GAMES = [
-    ['fa-coins', 'Coin Flip', 'Call it in the air.'],
-    ['fa-dice', 'Dice', 'Pick your odds, roll it.'],
-    ['fa-dharmachakra', 'Daily Wheel', 'One free spin every day.'],
-    ['fa-ticket', 'Scratch Cards', 'Scratch to reveal.'],
-    ['fa-brain', 'Trivia', 'Quick questions, quick rewards.'],
-    ['fa-trophy', 'Tournaments', 'Weekly prize pools.'],
-  ];
-
+  /** Games live in /js/games.js (loaded after this file); it fills in window.GR.games. */
   function pageGames() {
-    page(`<div class="press quiet games-hero" data-reveal>
-        <div class="games-dice"><i class="fa-solid fa-dice-five"></i><i class="fa-solid fa-dice-three"></i></div>
-        <span class="sticker"><i class="fa-solid fa-hourglass-half"></i> Coming soon</span>
-        <h1 class="mt-16">Games are on the way</h1>
-        <p class="muted mt-8">Quick games you can play with your balance, plus free daily ones. We're putting the finishing touches on them now.</p>
-      </div>
-      <div class="sec-title"><i class="fa-solid fa-gamepad"></i> What's coming</div>
-      <div class="games-grid">${GAMES.map(([ic, name, sub]) => `<div class="press quiet game-card" data-reveal>
-        <span class="game-lock"><i class="fa-solid fa-lock"></i></span>
-        <span class="game-icon"><i class="fa-solid ${ic}"></i></span>
-        <b>${name}</b><small>${sub}</small><span class="badge b-gold mt-8">Soon</span></div>`).join('')}</div>`);
+    const g = window.GR && window.GR.games;
+    if (!g) { page(emptyHTML('Games failed to load. Refresh the page.', 'fa-triangle-exclamation')); return; }
+    if (state.route[1]) g.play(state.route[1]); else g.lobby();
   }
 
   /* =============================================================== cashout */
@@ -1289,6 +1275,7 @@
     walls: adminWalls,
     logs: adminLogs,
     audit: adminAudit,
+    games: adminGames,
     completions: adminCompletions,
     withdrawals: adminWithdrawals,
     methods: adminMethods,
@@ -1748,6 +1735,25 @@
     }));
   }
 
+  async function adminGames() {
+    const d = await api('/admin/games');
+    const box = (label, x) => `<div class="press quiet stat" data-reveal><span class="si"><i class="fa-solid fa-dice"></i></span><div><div class="sl">${label}</div>
+      <div class="sv ${x.wagered - x.paid >= 0 ? '' : 'red'}">${money(x.wagered - x.paid)}</div><div class="faint" style="font-size:12px;font-weight:600">${fmt(x.bets)} bets · ${money(x.wagered)} wagered</div></div></div>`;
+    setContent(`${adminHead('Games', 'House profit is what players wagered minus what was paid back. Limits and the on/off switch are in Settings.')}
+      <div class="stat-grid">${box('House profit today', d.today)}${box('Last 7 days', d.week)}${box('All time', d.all)}
+        <div class="press quiet stat" data-reveal><span class="si"><i class="fa-solid fa-hourglass-half"></i></span><div><div class="sl">Open rounds</div><div class="sv">${fmt(d.open.n)}</div><div class="faint" style="font-size:12px;font-weight:600">${money(d.open.amount)} at stake</div></div></div></div>
+      <div class="sec-title"><i class="fa-solid fa-chart-column"></i> By game</div>
+      <div class="table-wrap"><table><thead><tr><th>Game</th><th>Bets</th><th>Wagered</th><th>Paid</th><th style="text-align:right">House profit</th><th>Actual RTP</th></tr></thead><tbody>
+        ${d.byGame.map((g) => `<tr><td><b>${esc(g.name)}</b></td><td>${fmt(g.bets)}</td><td class="money">${money(g.wagered)}</td><td class="money">${money(g.paid)}</td>
+          <td style="text-align:right" class="money ${g.wagered - g.paid >= 0 ? 'green' : 'red'}">${money(g.wagered - g.paid)}</td><td class="faint">${g.wagered ? ((g.paid / g.wagered) * 100).toFixed(1) : '0'}%</td></tr>`).join('')
+        || `<tr><td colspan="6">${emptyHTML('No bets yet.', 'fa-dice')}</td></tr>`}</tbody></table></div>
+      <div class="sec-title"><i class="fa-solid fa-list"></i> Latest bets</div>
+      <div class="table-wrap"><table><thead><tr><th>When</th><th>Player</th><th>Game</th><th>Bet</th><th>Multiplier</th><th style="text-align:right">Payout</th></tr></thead><tbody>
+        ${d.bets.map((b) => `<tr><td class="faint nowrap">${dateTime(b.created_at)}</td><td><b>${esc(b.username)}</b></td><td>${esc(b.name)} ${b.status === 'active' ? '<span class="badge b-gold">open</span>' : ''}</td>
+          <td class="money">${money(b.amount)}</td><td>${Number(b.multiplier).toFixed(2)}×</td><td style="text-align:right" class="money ${b.payout > b.amount ? 'green' : ''}">${money(b.payout)}</td></tr>`).join('')
+        || `<tr><td colspan="6">${emptyHTML('No bets yet.', 'fa-dice')}</td></tr>`}</tbody></table></div>`);
+  }
+
   async function adminAudit() {
     const { entries } = await api('/admin/audit');
     setContent(`${adminHead('Audit log', 'Every change made in the admin panel, and who made it.')}
@@ -1787,6 +1793,12 @@
           ${row('referral_percent', 'Referral cut (%)', "Share of a referral's offer earnings paid to whoever invited them.", 'number', s.referral_percent, 'min="0" max="100"')}
           <p class="faint" style="font-size:13px;margin-top:10px">Cashout minimums are set per method under <a href="#/admin/methods" class="gold">Payout methods</a>.</p>
         </div>
+        <div class="panel mt-24"><h3>Games</h3>
+          ${toggle('games_enabled', 'Games on', 'Turn off to stop all new bets (open rounds can still finish).')}
+          ${row('games_min_bet', 'Minimum bet (USD)', 'Smallest bet allowed in any game.', 'number', dollars(s.games_min_bet || 10), 'min="0.01" step="0.01"')}
+          ${row('games_max_bet', 'Maximum bet (USD)', 'Largest bet allowed in any game.', 'number', dollars(s.games_max_bet || 10000), 'min="0.01" step="0.01"')}
+          ${row('games_max_win', 'Maximum win per bet (USD)', 'Payouts above this are capped. Protects you from huge multipliers (mines, limbo, crash).', 'number', dollars(s.games_max_win || 100000), 'min="0.01" step="0.01"')}
+        </div>
         <p class="faint mt-16" style="font-size:13px">Postback URLs, signatures and hold periods are set per network under <a href="#/admin/walls" class="gold">Offerwalls</a>.</p>
         <button class="btn btn-gold btn-lg mt-24">Save settings</button>
       </form>`);
@@ -1794,6 +1806,10 @@
       e.preventDefault();
       const body = formData(e.target);
       body.maintenance = body.maintenance ? 1 : 0;
+      body.games_enabled = body.games_enabled ? 1 : 0;
+      body.games_min_bet = toCents(body.games_min_bet);
+      body.games_max_bet = toCents(body.games_max_bet);
+      body.games_max_win = toCents(body.games_max_win);
       body.signup_bonus = toCents(body.signup_bonus);
       body.daily_reward = toCents(body.daily_reward);
       try {
@@ -1804,6 +1820,14 @@
       } catch (err) { toast(err.message, 'error'); }
     });
   }
+
+  /* ===================================================== shared with games */
+
+  window.GR = {
+    $, $$, esc, fmt, money, moneyShort, toCents, api, toast, coin, avatar, dateTime, emptyHTML, skels,
+    page, setContent, openModal, closeModal, confirmModal, openAuth, reveal, afterRender, countTo,
+    setUser, showBalance, creditFx, coinRain, go, state, reduced,
+  };
 
   /* ================================================================== boot */
 

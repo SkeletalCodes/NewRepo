@@ -5,6 +5,7 @@ const { db, credit, getSettings, setSetting } = require('./db');
 const { requireAdmin, hashPassword, passwordProblem, destroyOtherSessions, createResetToken, RESET_TTL_MS } = require('./auth');
 const { approveCompletion, rejectCompletion } = require('./rewards');
 const { PRESETS, SIG_METHODS, newToken, processPostback, buildTestPostback } = require('./offerwalls');
+const { GAMES } = require('./games/logic');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -46,6 +47,23 @@ router.use((req, res, next) => {
       .catch((err) => console.error('audit log failed', err.message));
   });
   next();
+});
+
+/* ----------------------------------------------------------------- games */
+
+router.get('/games', async (req, res) => {
+  const now = Date.now();
+  const sums = async (since) => db.get(`SELECT COUNT(*) AS bets, COALESCE(SUM(amount), 0) AS wagered, COALESCE(SUM(payout), 0) AS paid
+    FROM bets WHERE status = 'settled' AND settled_at > ?`, since);
+  const [today, week, all] = await Promise.all([sums(now - DAY_MS), sums(now - 7 * DAY_MS), sums(0)]);
+  const byGame = await db.all(`SELECT game, COUNT(*) AS bets, COALESCE(SUM(amount), 0) AS wagered, COALESCE(SUM(payout), 0) AS paid
+    FROM bets WHERE status = 'settled' GROUP BY game ORDER BY wagered DESC`);
+  const user = int(req.query.user);
+  const bets = await db.all(`SELECT b.id, b.game, b.amount, b.payout, b.multiplier, b.status, b.nonce, b.created_at, b.settled_at, u.username
+    FROM bets b JOIN users u ON u.id = b.user_id ${user ? 'WHERE b.user_id = ?' : ''} ORDER BY b.id DESC LIMIT 200`, ...(user ? [user] : []));
+  const open = await db.get("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS amount FROM bets WHERE status = 'active'");
+  const named = (r) => ({ ...r, name: GAMES[r.game] ? GAMES[r.game].name : r.game });
+  res.json({ today, week, all, byGame: byGame.map(named), bets: bets.map(named), open });
 });
 
 router.get('/audit', async (_req, res) => {
@@ -439,8 +457,9 @@ router.get('/transactions', async (_req, res) => {
 
 /* -------------------------------------------------------------- settings */
 
-const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent', 'announcement', 'maintenance', 'max_accounts_per_ip'];
-const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent', 'max_accounts_per_ip'];
+const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent', 'announcement', 'maintenance', 'max_accounts_per_ip',
+  'games_enabled', 'games_min_bet', 'games_max_bet', 'games_max_win'];
+const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent', 'max_accounts_per_ip', 'games_min_bet', 'games_max_bet', 'games_max_win'];
 
 router.get('/settings', async (_req, res) => res.json({ settings: await getSettings() }));
 
@@ -450,8 +469,9 @@ router.put('/settings', async (req, res) => {
     if (!(key in req.body)) continue;
     let value = req.body[key];
     if (NUMERIC.includes(key)) {
-      value = Math.min(key === 'referral_percent' ? 100 : 1_000_000, Math.max(0, int(value)));
-    } else if (key === 'maintenance') {
+      value = Math.min(key === 'referral_percent' ? 100 : 100_000_000, Math.max(0, int(value)));
+      if (key.startsWith('games_') && value < 1) return bad(res, 'Bet limits must be at least $0.01.');
+    } else if (key === 'maintenance' || key === 'games_enabled') {
       value = bool(value);
     } else {
       value = str(value, 500);

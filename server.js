@@ -7,6 +7,15 @@ const { db, migrate, getSetting, IS_PG, EPHEMERAL } = require('./src/db');
 const { loadUser, rateLimit } = require('./src/auth');
 const { seed, upgrade, ensureEnvAdmin } = require('./src/seed');
 const { processPostback, housekeeping } = require('./src/offerwalls');
+const games = require('./src/games/routes');
+
+// Crash rounds whose rocket already crashed get settled even if the player closed the tab.
+let lastGamesSweep = 0;
+function gamesHousekeeping() {
+  if (Date.now() - lastGamesSweep < 15_000) return;
+  lastGamesSweep = Date.now();
+  games.settleExpiredCrash().catch((err) => console.error('crash sweep failed', err.message));
+}
 
 // Schema + seed run once per process (once per cold start on serverless hosts).
 let ready = null;
@@ -41,6 +50,7 @@ app.use((_req, res, next) => {
 app.use('/api', async (_req, _res, next) => {
   await init();
   housekeeping(); // release held rewards, trim old logs (throttled)
+  gamesHousekeeping();
   next();
 });
 app.use(express.json({ limit: '50kb' }));
@@ -87,6 +97,7 @@ app.all('/api/postback/:slug/:token', postbackLimiter, express.urlencoded({ exte
   res.status(result.status).type('text/plain').send(result.body);
 });
 
+app.use('/api/games', games.router);
 app.use('/api/admin', require('./src/admin'));
 app.use('/api', require('./src/api'));
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found.' }));

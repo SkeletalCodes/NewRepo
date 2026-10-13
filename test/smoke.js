@@ -247,6 +247,143 @@ async function postback(url, opts) {
   r = await user('/health');
   assert.equal(r.data.ok, true);
 
+  /* ---------- games (real balance, server-side provably fair) ---------- */
+  {
+    const g = client();
+    await g('/auth/register', { username: 'gamer', email: 'gamer@example.com', password: 'gamerpass123', terms: true });
+    const gid = (await g('/me')).data.user.id;
+    await admin(`/admin/users/${gid}/balance`, { amount: 10000, reason: 'test funds' }); // $100
+    let bal = (await g('/me')).data.user.balance;
+    assert.equal(bal, 10025);
+
+    const cfg = (await g('/games/config')).data;
+    assert.equal(cfg.games.length, 16, '16 games, no slots');
+    assert.ok(!cfg.games.some((x) => /slot/i.test(x.id)));
+
+    const fair = (await g('/games/fair')).data;
+    assert.ok(fair.server_hash.length === 64 && fair.nonce === 0);
+
+    // instant game: dice
+    r = await g('/games/dice/bet', { amount: 100, params: { target: 50, mode: 'under' } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const d1 = r.data.bet;
+    assert.equal(d1.status, 'settled');
+    assert.equal(d1.nonce, 1);
+    assert.equal(d1.server_seed, null, 'server seed hidden until rotation');
+    const won = d1.result.roll < 50;
+    assert.equal(d1.payout, won ? 198 : 0, 'dice pays 1.98× under 50');
+    bal = bal - 100 + d1.payout;
+    assert.equal(r.data.user.balance, bal, 'balance debited and credited');
+
+    // limits and validation
+    assert.equal((await g('/games/dice/bet', { amount: 5, params: { target: 50, mode: 'under' } })).status, 400, 'below min bet');
+    assert.equal((await g('/games/dice/bet', { amount: 10001, params: { target: 50, mode: 'under' } })).status, 400, 'above max bet');
+    assert.equal((await g('/games/dice/bet', { amount: 100, params: { target: 99, mode: 'under' } })).status, 400, 'bad target');
+    assert.equal((await g('/games/slots/bet', { amount: 100, params: {} })).status, 404, 'no slots');
+    assert.equal((await user('/games/dice/bet', { amount: 100, params: { target: 50, mode: 'under' } })).status, 401, 'login required');
+
+    // every instant game runs
+    const instant = {
+      limbo: { target: 2 }, coinflip: { side: 'heads', risk: 'medium' }, double: { pick: 'red' }, diamonds: { risk: 'low' },
+      wheel: { risk: 'medium', segments: 20 }, plinko: { rows: 16, risk: 'high' }, keno: { picks: [1, 5, 9, 22, 40], risk: 'medium' },
+      baccarat: { side: 'banker' },
+    };
+    for (const [game, params] of Object.entries(instant)) {
+      r = await g(`/games/${game}/bet`, { amount: 50, params });
+      assert.equal(r.status, 200, `${game}: ${JSON.stringify(r.data)}`);
+      assert.equal(r.data.bet.status, 'settled');
+    }
+    r = await g('/games/roulette/bet', { params: { chips: { red: 100, n_17: 20 } } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.bet.amount, 120, 'roulette stake = sum of chips');
+
+    // mines: hidden layout, reveal, cash out
+    r = await g('/games/mines/bet', { amount: 200, params: { mines: 1 } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    let mb = r.data.bet;
+    assert.equal(mb.status, 'active');
+    assert.ok(!('layout' in mb.view), 'mine positions hidden while playing');
+    assert.equal((await g('/games/mines/bet', { amount: 200, params: { mines: 1 } })).status, 400, 'one open mines round at a time');
+    assert.equal((await g('/games/fair/rotate', { client_seed: 'abc' })).status, 400, 'cannot rotate with an open round');
+    // reveal tiles until we either hit the mine or have two gems, then cash out
+    let tile = 0;
+    while (mb.status === 'active' && mb.view.revealed.length < 2) {
+      r = await g(`/games/bets/${mb.id}/action`, { action: 'reveal', params: { tile: tile++ } });
+      assert.equal(r.status, 200, JSON.stringify(r.data));
+      mb = r.data.bet;
+    }
+    if (mb.status === 'active') {
+      // double-submit the cash out: only one may pay
+      const [c1, c2] = await Promise.all([g(`/games/bets/${mb.id}/action`, { action: 'cashout' }), g(`/games/bets/${mb.id}/action`, { action: 'cashout' })]);
+      const paidOnce = (await g('/games/bets?game=mines')).data.bets.find((x) => x.id === mb.id);
+      assert.equal(paidOnce.status, 'settled');
+      assert.equal(paidOnce.payout, Math.floor(200 * paidOnce.multiplier + 1e-9));
+      const wins = (await g('/me/history')).data.transactions.filter((t) => t.type === 'win' && t.description.startsWith('Mines'));
+      assert.equal(wins.length, 1, 'double cash out only pays once');
+      assert.ok(c1.status === 200 && c2.status === 200);
+    }
+    // blackjack round
+    r = await g('/games/blackjack/bet', { amount: 100, params: {} });
+    let bj = r.data.bet;
+    if (bj.status === 'active') {
+      assert.equal(bj.view.dealer.length, 1, 'dealer hole card hidden');
+      r = await g(`/games/bets/${bj.id}/action`, { action: 'stand' });
+      bj = r.data.bet;
+    }
+    assert.equal(bj.status, 'settled');
+    assert.ok(bj.view.dealer.length >= 2);
+    // crash: auto cash out at 1.01 resolves server-side
+    r = await g('/games/crash/bet', { amount: 100, params: { auto: 1.01 } });
+    const cb = r.data.bet;
+    assert.ok(!('crashedAt' in cb.view), 'crash point hidden');
+    await new Promise((ok) => setTimeout(ok, 250));
+    r = await g(`/games/bets/${cb.id}/action`, { action: 'poll' });
+    assert.equal(r.data.bet.status, 'settled');
+    assert.ok([0, 101].includes(r.data.bet.payout), JSON.stringify(r.data.bet));
+    // towers, pump, hilo start and move
+    for (const [game, params, move] of [['towers', { difficulty: 'easy' }, { action: 'pick', params: { col: 0 } }], ['pump', { difficulty: 'easy' }, { action: 'pump' }], ['hilo', {}, { action: 'hi' }]]) {
+      r = await g(`/games/${game}/bet`, { amount: 50, params });
+      assert.equal(r.status, 200, `${game} ${JSON.stringify(r.data)}`);
+      r = await g(`/games/bets/${r.data.bet.id}/action`, move);
+      assert.equal(r.status, 200, `${game} move ${JSON.stringify(r.data)}`);
+      if (r.data.bet.status === 'active') {
+        r = await g(`/games/bets/${r.data.bet.id}/action`, { action: 'cashout' });
+        assert.equal(r.data.bet.status, 'settled', `${game} cash out`);
+      }
+    }
+
+    // ledger = balance
+    const me = (await g('/me')).data.user;
+    const settledBets = (await g('/games/bets')).data.bets;
+    assert.ok(settledBets.length >= 10);
+    assert.equal(me.total_earned, 25 + 0, 'game winnings are not "earned"');
+
+    // max win cap
+    await admin('/admin/settings', { games_max_win: 150 }, 'PUT');
+    for (let i = 0; i < 6; i++) {
+      r = await g('/games/limbo/bet', { amount: 100, params: { target: 2 } });
+      if (r.data.bet.payout) { assert.equal(r.data.bet.payout, 150, 'payout capped at max win'); break; }
+    }
+    await admin('/admin/settings', { games_max_win: 100000 }, 'PUT');
+
+    // rotate, then the old server seed is revealed and the dice result verifies
+    assert.equal((await g('/games/fair/rotate', { client_seed: 'my-new-seed' })).status, 200);
+    const old = (await g('/games/bets?game=dice')).data.bets.find((x) => x.id === d1.id);
+    assert.ok(old.server_seed && old.server_seed.length === 64, 'server seed revealed after rotation');
+    const v = (await client()('/games/verify', { game: 'dice', server_seed: old.server_seed, client_seed: old.client_seed, nonce: old.nonce, params: old.params })).data;
+    assert.equal(v.server_hash, old.server_hash, 'hash matches');
+    assert.equal(v.result.roll, d1.result.roll, 'verifier reproduces the roll');
+    assert.equal((await g('/games/fair')).data.client_seed, 'my-new-seed');
+
+    // admin stats
+    const st = (await admin('/admin/games')).data;
+    assert.ok(st.all.bets >= 10 && st.byGame.length >= 10);
+    // games off
+    await admin('/admin/settings', { games_enabled: 0 }, 'PUT');
+    assert.equal((await g('/games/dice/bet', { amount: 100, params: { target: 50, mode: 'under' } })).status, 503);
+    await admin('/admin/settings', { games_enabled: 1 }, 'PUT');
+  }
+
   /* ---------- misc ---------- */
   assert.equal((await devA('/admin/overview')).status, 403, 'non-admin blocked');
   const o = (await admin('/admin/overview')).data;

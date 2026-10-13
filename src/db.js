@@ -238,6 +238,38 @@ const SCHEMA = [
     count INTEGER NOT NULL,
     reset_at BIGINT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS fair_seeds (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    server_seed TEXT NOT NULL,
+    next_server_seed TEXT NOT NULL,
+    client_seed TEXT NOT NULL,
+    nonce INTEGER NOT NULL DEFAULT 0,
+    prev_server_seed TEXT,
+    prev_client_seed TEXT,
+    prev_nonce INTEGER,
+    rotated_at BIGINT
+  )`,
+  `CREATE TABLE IF NOT EXISTS bets (
+    id ${ID},
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    game TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    payout INTEGER NOT NULL DEFAULT 0,
+    multiplier DOUBLE PRECISION NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    params TEXT NOT NULL DEFAULT '{}',
+    state TEXT NOT NULL DEFAULT '{}',
+    server_seed TEXT NOT NULL,
+    server_hash TEXT NOT NULL,
+    client_seed TEXT NOT NULL,
+    nonce INTEGER NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL,
+    settled_at BIGINT
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_bets_user ON bets(user_id, id)',
+  'CREATE INDEX IF NOT EXISTS idx_bets_active ON bets(status, game)',
+  'CREATE INDEX IF NOT EXISTS idx_bets_settled ON bets(settled_at)',
   `CREATE TABLE IF NOT EXISTS audit_log (
     id ${ID},
     admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -326,6 +358,10 @@ const DEFAULT_SETTINGS = {
   announcement: 'New here? Use code WELCOME for a free bonus.',
   maintenance: '0',
   max_accounts_per_ip: '0', // 0 = no limit
+  games_enabled: '1',
+  games_min_bet: '10', // cents
+  games_max_bet: '10000',
+  games_max_win: '100000', // largest payout from a single bet
 };
 
 /** Create tables and default settings. Safe to run concurrently (serverless cold starts). */
@@ -365,7 +401,8 @@ async function setSetting(key, value) {
 
 /** Credit (or debit, with a negative amount) a user's balance and log it in the ledger. */
 async function credit(q, userId, amount, type, description, at = Date.now()) {
-  const earned = amount > 0 && type !== 'refund' && type !== 'admin' ? amount : 0;
+  // "Earned" means money from offers, bonuses and referrals: not refunds, admin adjustments or game winnings.
+  const earned = amount > 0 && !['refund', 'admin', 'win', 'adjustment'].includes(type) ? amount : 0;
   await q.run('UPDATE users SET balance = balance + ?, total_earned = total_earned + ? WHERE id = ?', amount, earned, userId);
   await q.run('INSERT INTO transactions (user_id, amount, type, description, created_at) VALUES (?, ?, ?, ?, ?)',
     userId, amount, type, description, at);
