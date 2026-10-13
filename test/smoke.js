@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'goldrush-'));
 if (!process.env.DATABASE_URL) process.env.DB_PATH = path.join(dir, 'test.db');
+process.env.RATE_LIMIT_SCALE = '20'; // every test request comes from one IP
 const app = require('../server');
 
 const server = app.listen(0);
@@ -186,17 +187,77 @@ async function postback(url, opts) {
   await admin(`/admin/withdrawals/${wd.id}/reject`, { note: 'test' });
   assert.equal((await user('/me')).data.user.balance, before, 'rejected cashout refunded');
 
+  /* ---------- password reset, lockout, sessions ---------- */
+  r = await client()('/auth/forgot', { email: 'p1@example.com' });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.mail, false, 'no mail provider configured in tests');
+
+  r = await admin(`/admin/users/${uid}/reset-link`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const token = r.data.url.split('/#/reset/')[1];
+  assert.ok(token && token.length > 30, 'reset link has a token');
+  r = await client()(`/auth/reset/${token}`);
+  assert.equal(r.data.username, 'player1', 'token resolves to the user');
+  const other = client(); // a second device that should be signed out by the reset
+  assert.equal((await other('/auth/login', { login: 'player1', password: 'password123' })).status, 200);
+  assert.equal((await client()('/auth/reset', { token, password: 'short' })).status, 400, 'weak password rejected');
+  const resetter = client();
+  r = await resetter('/auth/reset', { token, password: 'brand-new-pass-1' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.user.id, uid, 'logged in after reset');
+  assert.equal((await resetter('/me')).status, 200);
+  assert.equal((await other('/me')).status, 401, 'reset signs out other devices');
+  assert.equal((await client()('/auth/reset', { token, password: 'another-pass-2' })).status, 404, 'reset link works once');
+  assert.equal((await client()('/auth/login', { login: 'player1', password: 'password123' })).status, 401, 'old password no longer works');
+  const relog = client();
+  assert.equal((await relog('/auth/login', { login: 'P1@EXAMPLE.COM', password: 'brand-new-pass-1', remember: false })).status, 200, 'log back in with new password, email any case');
+
+  // lockout after repeated wrong passwords
+  await client()('/auth/register', { username: 'locky', email: 'locky@example.com', password: 'lockypass123', terms: true });
+  let last;
+  for (let i = 0; i < 8; i++) last = await client()('/auth/login', { login: 'locky', password: `wrong-${i}` });
+  assert.equal(last.status, 401);
+  assert.match(last.data.error, /locked/, 'locked after 8 wrong passwords');
+  r = await client()('/auth/login', { login: 'locky', password: 'lockypass123' });
+  assert.equal(r.status, 429, 'even the right password waits out the lock');
+
+  // sessions list / revoke, password change signs out other devices
+  const devA = client();
+  const devB = client();
+  await devA('/auth/login', { login: 'player1', password: 'brand-new-pass-1' });
+  await devB('/auth/login', { login: 'player1', password: 'brand-new-pass-1' });
+  r = await devA('/me/sessions');
+  assert.ok(r.data.sessions.length >= 3 && r.data.sessions.filter((x) => x.current).length === 1, 'sessions listed, one current');
+  const bId = (await devB('/me/sessions')).data.sessions.find((x) => x.current).id;
+  assert.equal((await devA(`/me/sessions/${bId}`, undefined, 'DELETE')).status, 200);
+  assert.equal((await devB('/me')).status, 401, 'revoked device is signed out');
+  r = await devA('/me/password', { current: 'brand-new-pass-1', next: 'third-pass-333' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal((await relog('/me')).status, 401, 'password change signs out other devices');
+  assert.equal((await devA('/me')).status, 200, '...but keeps this one');
+  r = await devA('/me/email', { email: 'new-p1@example.com', password: 'third-pass-333' });
+  assert.equal(r.data.user.email, 'new-p1@example.com');
+  assert.equal((await devA('/me/email', { email: 'boss@example.com', password: 'third-pass-333' })).status, 400, 'email in use');
+
+  // admin actions are audited, secrets hidden
+  const audit = (await admin('/admin/audit')).data.entries;
+  assert.ok(audit.some((e) => e.action === 'Created password reset link'));
+  assert.ok(audit.some((e) => e.action === 'Added offerwall' && e.details.includes('[hidden]')), 'secrets hidden in audit details');
+
+  r = await user('/health');
+  assert.equal(r.data.ok, true);
+
   /* ---------- misc ---------- */
-  assert.equal((await user('/admin/overview')).status, 403, 'non-admin blocked');
+  assert.equal((await devA('/admin/overview')).status, 403, 'non-admin blocked');
   const o = (await admin('/admin/overview')).data;
   assert.ok(o.revenue_cents > 0 && o.active_walls === 3, JSON.stringify(o));
   assert.ok((await user('/leaderboard?period=weekly')).data.leaderboard.length > 0);
   assert.ok((await user('/feed')).data.feed.length > 0, 'feed shows real conversions');
   r = await admin(`/admin/offerwalls/${share.id}`, undefined, 'DELETE');
   assert.equal(r.status, 200, 'bodiless DELETE works');
-  await user('/auth/logout', {});
-  assert.equal((await user('/me')).status, 401);
-  assert.equal((await user('/auth/login', { login: 'p1@example.com', password: 'password123' })).status, 200);
+  await devA('/auth/logout', {});
+  assert.equal((await devA('/me')).status, 401);
+  assert.equal((await devA('/auth/login', { login: 'new-p1@example.com', password: 'third-pass-333' })).status, 200, 'can log back in after logging out');
 
   console.log(`All smoke tests passed ✔ (${process.env.DATABASE_URL ? 'Postgres' : 'SQLite'})`);
   server.close();

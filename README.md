@@ -50,7 +50,10 @@ All money is stored as integer **US cents**. A database from the earlier Gems ve
 - Cashout page with methods grouped by type, amount presets, destination field and cashout history
 - Weekly, monthly and all-time leaderboard with a podium
 - Referral page with a share link (`/?ref=CODE`) and lifetime commission
-- Profile page with activity, earnings (including rewards on hold) and cashout history, and password change
+- Profile page with activity, earnings (including rewards on hold) and cashout history
+- Account settings: change password or email, see every device you're logged in on, sign any of them out
+- Forgot password: emailed reset link (1 hour, single use), or a link an admin creates for you
+- Games section in the sidebar (coming soon)
 - Responsive layout: on mobile the sidebar becomes a drawer
 
 **Admin panel** (`/#/admin`)
@@ -61,9 +64,21 @@ All money is stored as integer **US cents**. A database from the earlier Gems ve
 - Users: search, adjust balance, ban/unban, promote/demote, reset password, delete
 - Cashouts: mark as paid with a note, or reject, which refunds the user automatically
 - Payout methods, promo codes (max uses and expiry) and a full transaction log
-- Settings: site name, sign-up bonus, daily bonus, referral %, announcement bar, maintenance mode
+- Users panel also shows signup and last IP, other accounts on the same IP, lockouts, and active sessions; admins can create a password reset link or sign a user out everywhere
+- Audit log: every admin change, who made it and from where (secrets are never recorded)
+- Settings: site name, sign-up bonus, daily bonus, referral %, max accounts per IP, announcement bar, maintenance mode
 
 There are no fake offers, walls or users. A database from an earlier version is cleaned up automatically on first start: demo users, demo offers and demo offerwalls are deleted, and any balance users got from the simulated offers is taken back, with an "adjustment" entry in their history.
+
+## Accounts & security
+
+- **Passwords**: hashed with scrypt. Very common passwords are refused. Login takes the same time whether or not the account exists.
+- **Sessions**: random tokens, stored only as hashes, in `httpOnly` cookies. "Keep me logged in" lasts 30 days and stays active while you use the site; otherwise sessions last a day. Users can see and revoke their sessions. Changing or resetting a password signs out every other device.
+- **Lockout**: 8 wrong passwords lock an account for 15 minutes. Resetting the password unlocks it.
+- **Rate limits** are stored in the database, so they hold across Vercel's many server instances: login, sign-up, forgot password and reset are each limited per IP, and reset emails per address.
+- **Password reset**: `POST /api/auth/forgot` always answers the same way, so it can't be used to find out which emails have accounts. The link is good for 1 hour, works once, and only the newest link works.
+- **Email**: set `RESEND_API_KEY` (simplest) or `SMTP_URL`, plus `MAIL_FROM` and `SITE_URL`. Without email, the forgot-password form tells users to contact support, and admins can create a reset link from the Users panel.
+- **Health check**: `GET /api/health` reports the database type and whether storage is persistent.
 
 ## Offerwall integration
 
@@ -114,6 +129,10 @@ The success reply defaults to `1`. Change it per wall if a network expects somet
 | `DATABASE_URL` | — | Postgres connection string (also reads `POSTGRES_URL`). Use this in production. |
 | `DB_PATH` | `data/gemrush.db` | SQLite file, used only when no Postgres URL is set |
 | `NODE_ENV` | — | `production` marks cookies `Secure` (needs HTTPS) |
+| `SITE_URL` | request origin | Public URL used in emailed links, e.g. `https://yoursite.com` |
+| `RESEND_API_KEY` | — | Send email through [Resend](https://resend.com) |
+| `SMTP_URL` | — | Or send through any SMTP server, e.g. `smtps://user:pass@smtp.gmail.com:465` |
+| `MAIL_FROM` | — | Sender, e.g. `GoldRush <no-reply@yoursite.com>` (required for either) |
 | `TRUST_PROXY` | — | `1` when behind a reverse proxy (for correct IPs and rate limits). Automatic on Vercel. |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` | — | create or reset an admin on boot |
 
@@ -130,12 +149,13 @@ The success reply defaults to `1`. Change it per wall if a network expects somet
 ```
 server.js          Express app, security headers, postback route
 src/db.js          Postgres/SQLite adapter, schema, settings, ledger helpers
-src/auth.js        Password hashing, sessions, rate limiting
+src/auth.js        Passwords, sessions, lockout, reset tokens, rate limits
 src/api.js         Public/user API (auth, offers, daily, promo, cashout, feed, leaderboard)
 src/admin.js       Admin API
 src/rewards.js     Approve/reject completions + referral commission
 src/offerwalls.js  Offerwall presets, signature checks, postback processing, holds
 src/seed.js        Payout methods, welcome promo, one-time upgrades
+src/mail.js        Email via Resend or SMTP, and the email template
 public/            SPA (index.html, css/style.css, js/app.js)
 test/smoke.js      End-to-end API test
 ```

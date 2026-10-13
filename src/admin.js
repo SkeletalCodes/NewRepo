@@ -2,12 +2,58 @@
 
 const express = require('express');
 const { db, credit, getSettings, setSetting } = require('./db');
-const { requireAdmin, hashPassword } = require('./auth');
+const { requireAdmin, hashPassword, passwordProblem, destroyOtherSessions, createResetToken, RESET_TTL_MS } = require('./auth');
 const { approveCompletion, rejectCompletion } = require('./rewards');
 const { PRESETS, SIG_METHODS, newToken, processPostback, buildTestPostback } = require('./offerwalls');
 
 const router = express.Router();
 router.use(requireAdmin);
+
+/* ------------------------------------------------------------ audit log */
+
+const SECRET_FIELDS = /password|secret|token/i;
+const AUDIT_LABELS = [
+  [/^POST \/users\/\d+\/balance$/, 'Adjusted balance'],
+  [/^POST \/users\/\d+\/reset-link$/, 'Created password reset link'],
+  [/^POST \/users\/\d+\/logout$/, 'Signed user out everywhere'],
+  [/^PATCH \/users\/\d+$/, 'Updated user'],
+  [/^DELETE \/users\/\d+$/, 'Deleted user'],
+  [/^POST \/offerwalls$/, 'Added offerwall'],
+  [/^PUT \/offerwalls\/\d+$/, 'Updated offerwall'],
+  [/^DELETE \/offerwalls\/\d+$/, 'Deleted offerwall'],
+  [/^POST \/offerwalls\/\d+\/token$/, 'Regenerated postback URL'],
+  [/^POST \/offerwalls\/\d+\/test$/, 'Sent test postback'],
+  [/^POST \/completions\/\d+\/approve$/, 'Released conversion'],
+  [/^POST \/completions\/\d+\/reject$/, 'Rejected conversion'],
+  [/^POST \/withdrawals\/\d+\/pay$/, 'Marked cashout paid'],
+  [/^POST \/withdrawals\/\d+\/reject$/, 'Rejected cashout'],
+  [/^(POST|PUT|DELETE) \/reward-methods/, 'Changed payout methods'],
+  [/^(POST|PATCH|DELETE) \/promos/, 'Changed promo codes'],
+  [/^PUT \/settings$/, 'Changed settings'],
+];
+
+/** Every successful admin change is recorded, with secrets stripped from the details. */
+router.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  const sig = `${req.method} ${req.path}`;
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    const label = (AUDIT_LABELS.find(([re]) => re.test(sig)) || [null, sig])[1];
+    const details = {};
+    for (const [k, v] of Object.entries(req.body || {})) details[k] = SECRET_FIELDS.test(k) ? '[hidden]' : String(v).slice(0, 120);
+    db.run('INSERT INTO audit_log (admin_id, action, target, details, ip, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      req.user.id, label, req.path.slice(0, 120), JSON.stringify(details).slice(0, 2000), String(req.ip || '').slice(0, 64), Date.now())
+      .catch((err) => console.error('audit log failed', err.message));
+  });
+  next();
+});
+
+router.get('/audit', async (_req, res) => {
+  res.json({
+    entries: await db.all(`SELECT a.*, u.username AS admin_name FROM audit_log a LEFT JOIN users u ON u.id = a.admin_id
+      ORDER BY a.id DESC LIMIT 300`),
+  });
+});
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
@@ -70,10 +116,16 @@ router.get('/users', async (req, res) => {
 
 router.get('/users/:id', async (req, res) => {
   const id = int(req.params.id);
-  const user = await db.get('SELECT id, username, email, balance, total_earned, role, banned, referral_code, created_at, last_login_at FROM users WHERE id = ?', id);
+  const user = await db.get(`SELECT id, username, email, balance, total_earned, role, banned, referral_code, created_at, last_login_at,
+      signup_ip, last_ip, locked_until, password_changed_at FROM users WHERE id = ?`, id);
   if (!user) return bad(res, 'User not found.', 404);
+  const ips = [...new Set([user.signup_ip, user.last_ip].filter(Boolean))];
+  const sameIp = ips.length ? await db.all(`SELECT id, username, banned FROM users
+    WHERE id != ? AND (signup_ip IN (${ips.map(() => '?').join(',')}) OR last_ip IN (${ips.map(() => '?').join(',')})) LIMIT 20`, id, ...ips, ...ips) : [];
   res.json({
     user,
+    same_ip: sameIp,
+    sessions: (await db.get('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND expires_at > ?', id, Date.now())).n,
     transactions: await db.all('SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 50', id),
     withdrawals: await db.all('SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 50', id),
   });
@@ -89,19 +141,34 @@ router.post('/users/:id/balance', async (req, res) => {
   res.json({ ok: true });
 });
 
+/** A one-hour reset link the admin can send the user themselves (handy when email isn't set up). */
+router.post('/users/:id/reset-link', async (req, res) => {
+  const user = await db.get('SELECT id FROM users WHERE id = ?', int(req.params.id));
+  if (!user) return bad(res, 'User not found.', 404);
+  const token = await createResetToken(user.id, req.ip);
+  const base = (process.env.SITE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+  res.json({ url: `${base}/#/reset/${token}`, expires_in_minutes: RESET_TTL_MS / 60000 });
+});
+
+router.post('/users/:id/logout', async (req, res) => {
+  await destroyOtherSessions(int(req.params.id));
+  res.json({ ok: true });
+});
+
 router.patch('/users/:id', async (req, res) => {
   const id = int(req.params.id);
   const body = req.body || {};
   if (!(await db.get('SELECT 1 AS x FROM users WHERE id = ?', id))) return bad(res, 'User not found.', 404);
   if (id === req.user.id && (body.banned || body.role === 'user')) return bad(res, "You can't ban or demote yourself.");
-  if (body.password && String(body.password).length < 8) return bad(res, 'Password must be at least 8 characters.');
+  if (body.password && passwordProblem(String(body.password))) return bad(res, passwordProblem(String(body.password)));
   if ('banned' in body) {
     await db.run('UPDATE users SET banned = ? WHERE id = ?', bool(body.banned), id);
     if (bool(body.banned)) await db.run('DELETE FROM sessions WHERE user_id = ?', id);
   }
   if (body.role === 'admin' || body.role === 'user') await db.run('UPDATE users SET role = ? WHERE id = ?', body.role, id);
   if (body.password) {
-    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(String(body.password)), id);
+    await db.run('UPDATE users SET password_hash = ?, password_changed_at = ?, failed_logins = 0, locked_until = NULL WHERE id = ?',
+      hashPassword(String(body.password)), Date.now(), id);
     await db.run('DELETE FROM sessions WHERE user_id = ?', id);
   }
   res.json({ ok: true });
@@ -372,8 +439,8 @@ router.get('/transactions', async (_req, res) => {
 
 /* -------------------------------------------------------------- settings */
 
-const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent', 'announcement', 'maintenance'];
-const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent'];
+const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent', 'announcement', 'maintenance', 'max_accounts_per_ip'];
+const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent', 'max_accounts_per_ip'];
 
 router.get('/settings', async (_req, res) => res.json({ settings: await getSettings() }));
 

@@ -30,10 +30,12 @@
   }
   const logo = (spec, color, cls = '') => `<span class="logo ${cls}" style="color:${safeColor(color)}">${icon(spec)}</span>`;
 
+  /** A 3D gold coin. Classes: (default) gentle tilt + shine, 'spin' full turns, 'fast' quick spin, 'still'. */
   function coin(cls = '', size) {
     let edges = '';
     for (let k = -3; k <= 3; k++) edges += `<i style="transform:translateZ(calc(var(--s) * ${(k * 0.014).toFixed(3)}))"></i>`;
-    return `<span class="coin ${cls}"${size ? ` style="--s:${size}px"` : ''}>${edges}<span class="face front">$</span><span class="face back">$</span></span>`;
+    const face = (side) => `<span class="face ${side}"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#gr-coin"/></svg><span class="shine"></span></span>`;
+    return `<span class="coin ${cls}"${size ? ` style="--s:${size}px"` : ''} aria-hidden="true">${edges}${face('front')}${face('back')}</span>`;
   }
 
   function duration(mins) {
@@ -192,15 +194,54 @@
   const state = { config: {}, user: null, feed: [], route: [] };
   const actions = {};
 
+  /** Animate the top-bar balance to `to`: count up/down, flip the coin, pop a +$x label, glow and sparks. */
+  function showBalance(to) {
+    const el = $('#bal-amt');
+    if (!el) return;
+    const from = Number(el.dataset.v || 0);
+    countTo(el, to, money, 1100);
+    const delta = to - from;
+    if (!delta || reduced) return;
+    const pill = el.closest('.balance');
+    const coinEl = $('#bal-coin .coin');
+    const restart = (node, cls) => { node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); };
+    if (coinEl && delta > 0) restart(coinEl, 'pop');
+    restart(pill, delta > 0 ? 'glow' : 'loss');
+    // Float the +$x label over the page (the top bar clips its own overflow for the clouds).
+    const chip = document.createElement('span');
+    const pr = pill.getBoundingClientRect();
+    chip.className = `bal-float ${delta < 0 ? 'neg' : ''}`;
+    chip.textContent = `${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}`;
+    chip.style.left = `${pr.left + pr.width / 2}px`;
+    chip.style.top = `${pr.bottom + 4}px`;
+    document.body.appendChild(chip);
+    setTimeout(() => chip.remove(), 1700);
+    if (delta > 0 && coinEl) {
+      const box = pill.getBoundingClientRect();
+      const c = coinEl.getBoundingClientRect();
+      for (let i = 0; i < 10; i++) {
+        const sp = document.createElement('span');
+        sp.className = 'spark';
+        sp.style.left = `${c.left - box.left + c.width / 2 - 3}px`;
+        sp.style.top = `${c.top - box.top + c.height / 2 - 3}px`;
+        pill.appendChild(sp);
+        const ang = (i / 10) * Math.PI * 2;
+        const dist = 22 + Math.random() * 18;
+        sp.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${Math.cos(ang) * dist}px, ${Math.sin(ang) * dist}px) scale(0)`, opacity: 0 }],
+          { duration: 700 + Math.random() * 300, easing: 'cubic-bezier(.2,.8,.3,1)' }).finished.then(() => sp.remove());
+      }
+    }
+  }
+
   function setUser(user) {
     state.user = user;
-    if (user) countTo($('#bal-amt'), user.balance);
+    if (user) showBalance(user.balance);
   }
 
   /** Update the balance right away, but let the top-bar number tick up once the coins land. */
   function creditFx(fromEl, user, n = 10) {
     state.user = user;
-    flyCoins(fromEl, n).then(() => countTo($('#bal-amt'), state.user.balance));
+    flyCoins(fromEl, n).then(() => showBalance(state.user.balance));
   }
 
   const pct = (have, need) => Math.max(0, Math.min(100, (have / Math.max(1, need)) * 100));
@@ -260,6 +301,8 @@
     wall: pageWall,
     cashout: pageCashout,
     leaderboard: pageLeaderboard,
+    games: pageGames,
+    reset: pageReset,
     referrals: () => (requireAuth('login') ? pageReferrals() : go('earn')),
     profile: () => (requireAuth('login') ? pageProfile() : go('earn')),
     admin: pageAdmin,
@@ -276,15 +319,21 @@
     }
     $('.dropdown') && $('.dropdown').remove();
     $('.side-backdrop') && $('.side-backdrop').remove();
+    $('.sidebar') && $('.sidebar').classList.remove('open');
     window.scrollTo(0, 0);
     handler();
   }
 
   /* ================================================================= feed */
 
+  let feedKey = '';
   async function loadFeed() {
     try {
-      state.feed = (await api('/feed')).feed;
+      const { feed } = await api('/feed');
+      const key = feed.map((f) => f.id).join(',');
+      state.feed = feed;
+      if (key === feedKey) return; // unchanged: don't restart the scrolling ticker
+      feedKey = key;
       const el = $('#ticker');
       if (el) el.innerHTML = tickerHTML();
     } catch { /* ignore */ }
@@ -298,7 +347,9 @@
     return `<div class="ticker-track">${items}</div><div class="ticker-track" aria-hidden="true">${items}</div>`;
   }
 
-  const clouds = () => `<div class="clouds"><div class="track">${'<div class="cloud"></div>'.repeat(40)}</div></div>`;
+  // The drift is tied to the clock, so the clouds are in the same place on every page and after reloads.
+  const CLOUD_LOOP_S = 90;
+  const clouds = () => `<div class="clouds"><div class="track" style="animation-delay:-${((Date.now() / 1000) % CLOUD_LOOP_S).toFixed(2)}s">${'<div class="cloud"></div>'.repeat(40)}</div></div>`;
   const brand = (cls = '') => `<a href="#/" class="brand ${cls}">${coin('', 34)}<span>${esc(state.config.site_name)}</span></a>`;
 
   /* =============================================================== landing */
@@ -310,6 +361,7 @@
   ];
 
   async function renderLanding() {
+    shellKey = null;
     const c = state.config;
     $('#app').innerHTML = `
     <nav class="lnav">${clouds()}
@@ -339,10 +391,10 @@
           </div>
         </div>
         <div class="stage">
-          <div class="big-coin bob">${coin()}</div>
+          <div class="big-coin bob">${coin('spin')}</div>
           <div class="coin-shadow"></div>
-          <span class="mini" style="left:6%;top:12%;animation-delay:-1s">${coin('', 36)}</span>
-          <span class="mini" style="left:22%;top:40%;animation-delay:-2.4s">${coin('', 24)}</span>
+          <span class="mini" style="left:6%;top:12%;animation-delay:-1s">${coin('spin', 36)}</span>
+          <span class="mini" style="left:22%;top:40%;animation-delay:-2.4s">${coin('spin', 24)}</span>
           <div class="receipt press quiet">
             <div class="receipt-in">
               <div class="label"><i class="fa-solid fa-receipt"></i> Live earnings <span class="spacer"></span><span class="badge b-green" style="text-transform:none"><i class="fa-solid fa-circle" style="font-size:7px;color:var(--green)"></i> live</span></div>
@@ -500,13 +552,41 @@
     const panel = $('#auth-panel');
     const setTab = (tab) => {
       $$('.seg button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+      if (tab === 'forgot') {
+        panel.innerHTML = `<div class="modal-head"><h2>Forgot your password?</h2><p>Enter your account email and we'll send you a link to choose a new one.</p></div>
+          <form id="forgot-f" novalidate>
+            <div id="auth-err"></div>
+            <div class="field"><label>Email</label><div class="input-icon"><i class="fa-solid fa-envelope"></i><input class="input" type="email" name="email" autocomplete="email" placeholder="you@example.com" required></div></div>
+            <button class="btn btn-gold btn-block btn-lg" type="submit">Send reset link</button>
+            <p class="center muted mt-16" style="font-size:14px">Remembered it? <a href="#" class="gold" data-switch="login">Back to log in</a></p>
+          </form>`;
+        $$('[data-switch]', panel).forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); setTab(a.dataset.switch); }));
+        $('input', panel).focus();
+        $('#forgot-f').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const btn = $('button[type=submit]', e.target);
+          await withBusy(btn, async () => {
+            try {
+              const r = await api('/auth/forgot', { body: formData(e.target) });
+              panel.innerHTML = `<div class="center page-in"><span class="sent-icon"><i class="fa-solid ${r.mail ? 'fa-envelope-circle-check' : 'fa-headset'}"></i></span>
+                <h2 class="mt-16" style="font-size:24px;color:#fff">${r.mail ? 'Check your inbox' : 'Contact support'}</h2>
+                <p class="muted mt-8">${esc(r.message)}</p>
+                <button class="btn btn-block mt-24" data-switch="login">Back to log in</button></div>`;
+              $$('[data-switch]', panel).forEach((a) => a.addEventListener('click', (ev) => { ev.preventDefault(); setTab(a.dataset.switch); }));
+            } catch (err) { $('#auth-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+          });
+        });
+        return;
+      }
       if (tab === 'login') {
         panel.innerHTML = `<div class="modal-head"><h2>Welcome back</h2><p>Log in to keep earning.</p></div>
           <form id="auth-f" novalidate>
             <div id="auth-err"></div>
             <div class="field"><label>Username or email</label><div class="input-icon"><i class="fa-solid fa-user"></i><input class="input" name="login" autocomplete="username" required></div></div>
-            <div class="field"><label>Password</label><div class="input-icon"><i class="fa-solid fa-lock"></i><input class="input" type="password" name="password" autocomplete="current-password" required></div></div>
-            <button class="btn btn-gold btn-block btn-lg mt-8" type="submit">Log in</button>
+            <div class="field"><div class="row"><label>Password</label><span class="spacer"></span><a href="#" class="gold" style="font-size:13px;font-weight:600" data-switch="forgot">Forgot password?</a></div>
+              <div class="input-icon"><i class="fa-solid fa-lock"></i><input class="input" type="password" name="password" autocomplete="current-password" required><button type="button" class="pw-toggle" aria-label="Show password"><i class="fa-regular fa-eye"></i></button></div></div>
+            <label class="check" style="margin-bottom:16px"><input type="checkbox" name="remember" checked> <span>Keep me logged in for 30 days</span></label>
+            <button class="btn btn-gold btn-block btn-lg" type="submit">Log in</button>
             <p class="center muted mt-16" style="font-size:14px">New here? <a href="#" class="gold" data-switch="register">Create an account</a></p>
           </form>`;
       } else {
@@ -515,7 +595,7 @@
             <div id="auth-err"></div>
             <div class="field"><label>Username</label><div class="input-icon"><i class="fa-solid fa-user"></i><input class="input" name="username" autocomplete="username" maxlength="20" placeholder="3-20 characters" required></div></div>
             <div class="field"><label>Email</label><div class="input-icon"><i class="fa-solid fa-envelope"></i><input class="input" type="email" name="email" autocomplete="email" placeholder="you@example.com" required></div></div>
-            <div class="field"><label>Password</label><div class="input-icon"><i class="fa-solid fa-lock"></i><input class="input" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters" required></div>
+            <div class="field"><label>Password</label><div class="input-icon"><i class="fa-solid fa-lock"></i><input class="input" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters" required><button type="button" class="pw-toggle" aria-label="Show password"><i class="fa-regular fa-eye"></i></button></div>
               <div class="pw-meter"><div id="pw-bar" style="width:0"></div></div></div>
             <div class="field"><label>Referral code <span class="faint">(optional)</span></label><div class="input-icon"><i class="fa-solid fa-ticket"></i><input class="input" name="referral" value="${esc(ref)}" placeholder="e.g. A1B2C3D4"></div></div>
             <label class="check" style="margin-bottom:18px"><input type="checkbox" name="terms"> <span>I'm 13 or older and agree to the <a href="#" class="gold" data-act="terms">Terms</a> and <a href="#" class="gold" data-act="privacy">Privacy Policy</a>.</span></label>
@@ -531,6 +611,7 @@
         });
       }
       $$('[data-switch]', panel).forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); setTab(a.dataset.switch); }));
+      bindPwToggles(panel);
       $('input', panel).focus();
       $('#auth-f').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -559,7 +640,64 @@
       });
     };
     $$('.seg button').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+    if (c.ephemeral) $('.auth-form').insertAdjacentHTML('afterbegin', `<div class="form-error" style="font-size:13px"><b>Heads up:</b> this site isn't connected to its database yet, so accounts can disappear and you may not be able to log back in. The owner needs to connect Postgres.</div>`);
     setTab(mode);
+  }
+
+  function bindPwToggles(root) {
+    $$('.pw-toggle', root).forEach((b) => b.addEventListener('click', () => {
+      const input = b.parentElement.querySelector('input');
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      b.innerHTML = `<i class="fa-regular ${show ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
+      b.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    }));
+  }
+
+  /** #/reset/<token>: the link from the reset email (or from an admin). */
+  async function pageReset() {
+    const token = state.route[1] || '';
+    if (state.user) pageEarn(); else renderLanding();
+    // Keep the token out of browser history once we've read it.
+    history.replaceState(null, '', '/#/');
+    state.route = [];
+    let username = '';
+    try {
+      username = (await api(`/auth/reset/${encodeURIComponent(token)}`)).username;
+    } catch (err) {
+      openModal(`<div class="modal-body center"><span class="sent-icon bad"><i class="fa-solid fa-link-slash"></i></span>
+        <h2 class="mt-16" style="font-size:24px;color:#fff">Link expired</h2><p class="muted mt-8">${esc(err.message)}</p>
+        <button class="btn btn-gold btn-block mt-24" id="rs-new">Get a new link</button></div>`);
+      $('#rs-new').addEventListener('click', () => { openAuth('login'); $('[data-switch="forgot"]') && $('[data-switch="forgot"]').click(); });
+      return;
+    }
+    openModal(`<div class="modal-body"><div class="modal-head"><h2>Choose a new password</h2><p>For <b class="gold">${esc(username)}</b>. You'll be logged in right after, and signed out everywhere else.</p></div>
+      <form id="rs-f" novalidate><div id="rs-err"></div>
+        <div class="field"><label>New password</label><div class="input-icon"><i class="fa-solid fa-lock"></i><input class="input" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters" required><button type="button" class="pw-toggle" aria-label="Show password"><i class="fa-regular fa-eye"></i></button></div>
+          <div class="pw-meter"><div id="rs-bar" style="width:0"></div></div></div>
+        <div class="field"><label>Type it again</label><div class="input-icon"><i class="fa-solid fa-lock"></i><input class="input" type="password" name="confirm" autocomplete="new-password" required></div></div>
+        <button class="btn btn-gold btn-block btn-lg mt-8" type="submit">Save password & log in</button>
+      </form></div>`);
+    const f = $('#rs-f');
+    bindPwToggles(f);
+    f.password.addEventListener('input', () => {
+      const sc = pwStrength(f.password.value);
+      $('#rs-bar').style.width = `${(sc / 5) * 100}%`;
+      $('#rs-bar').style.background = ['#ff5c7a', '#ff5c7a', '#eac837', '#eac837', '#14f195', '#14f195'][sc];
+    });
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (f.password.value !== f.confirm.value) { $('#rs-err').innerHTML = '<div class="form-error">The two passwords don\'t match.</div>'; return; }
+      await withBusy($('button[type=submit]', f), async () => {
+        try {
+          const { user } = await api('/auth/reset', { body: { token, password: f.password.value } });
+          state.user = user;
+          closeModal();
+          toast('Password changed. You\'re logged in.', 'success');
+          go('earn');
+        } catch (err) { $('#rs-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+      });
+    });
   }
   actions.login = () => openAuth('login');
   actions.register = () => openAuth('register');
@@ -577,7 +715,7 @@
     const c = state.config;
     const u = state.user;
     const slides = [
-      () => `${coin()}
+      () => `${coin('spin')}
        <h2>Welcome, ${esc(u.username)}.</h2>
        <p class="muted mt-8">Your account is ready, and your sign-up bonus is already in.</p>
        <div class="amt" id="ob-amt">$0.00</div>
@@ -622,18 +760,33 @@
 
   /* ============================================================== app shell */
 
-  function navItem(path, ic, label, extra = '') {
+  function isActive(path) {
     const [p0, p1 = ''] = path.split('/');
-    const active = (state.route[0] || '') === p0 && (p0 !== 'admin' || (state.route[1] || '') === p1);
-    return `<a href="#/${path}" class="nav-item ${active ? 'active' : ''}"><i class="fa-solid ${ic}"></i>${label}${extra}</a>`;
+    return (state.route[0] || '') === p0 && (p0 !== 'admin' || (state.route[1] || '') === p1);
   }
+
+  function navItem(path, ic, label, extra = '') {
+    return `<a href="#/${path}" data-path="${path}" class="nav-item ${isActive(path) ? 'active' : ''}"><i class="fa-solid ${ic}"></i>${label}${extra}</a>`;
+  }
+
+  const EPHEMERAL_NOTICE = '<div class="notice warn"><i class="fa-solid fa-triangle-exclamation"></i><span><b>Heads up:</b> this site isn\'t connected to its database yet, so accounts and balances can disappear. The owner needs to connect Postgres (see README).</span></div>';
+
+  /*
+   * The shell (sidebar, top bar, clouds, ticker) is built once and kept while you move between pages,
+   * so its animations don't restart. It's only rebuilt when something it shows changes
+   * (logging in or out, entering or leaving the admin panel, settings).
+   */
+  let shellKey = null;
 
   function shell(content) {
     const c = state.config;
     const u = state.user;
     const isAdmin = u && u.role === 'admin';
     const inAdmin = state.route[0] === 'admin';
-    $('#app').innerHTML = `<div class="shell">
+    const key = JSON.stringify([inAdmin, u && u.id, u && u.role, c.site_name, c.announcement, c.maintenance, c.ephemeral, c.referral_percent]);
+    if (key !== shellKey || !$('#content')) {
+      shellKey = key;
+      $('#app').innerHTML = `<div class="shell">
       <aside class="sidebar">
         ${brand()}
         ${inAdmin ? `
@@ -647,12 +800,14 @@
           ${navItem('admin/methods', 'fa-wallet', 'Payout methods')}
           ${navItem('admin/promos', 'fa-ticket', 'Promo codes')}
           ${navItem('admin/transactions', 'fa-receipt', 'Transactions')}
+          ${navItem('admin/audit', 'fa-clipboard-list', 'Audit log')}
           ${navItem('admin/settings', 'fa-gear', 'Settings')}
           <div class="nav-label">Site</div>
           ${navItem('earn', 'fa-arrow-left', 'Back to site')}
         ` : `
           <div class="nav-label">Earn</div>
           ${navItem('earn', 'fa-house', 'Home')}
+          ${navItem('games', 'fa-gamepad', 'Games', ' <span class="tag soon-tag">SOON</span>')}
           ${navItem('leaderboard', 'fa-trophy', 'Leaderboard')}
           <div class="nav-label">Account</div>
           ${navItem('cashout', 'fa-money-bill-wave', 'Cash out')}
@@ -674,7 +829,7 @@
             ${u ? `
               <div class="balance">
                 <span id="bal-coin">${coin('', 30)}</span>
-                <span class="amt" id="bal-amt" data-v="${u.balance}">${money(u.balance)}</span>
+                <span class="amt"><span id="bal-amt" data-v="${u.balance}">${money(u.balance)}</span><small>USD</small></span>
                 <a href="#/cashout" class="btn btn-gold btn-sm">Cash out</a>
               </div>
               <div class="user-chip" data-act="user-menu">${avatar(u.username, u.avatar_color)}<b class="hide-sm">${esc(u.username)}</b><i class="fa-solid fa-chevron-down faint hide-sm" style="font-size:11px"></i></div>
@@ -684,14 +839,18 @@
             `}
           </div>
         </div>
-        ${c.ephemeral && isAdmin ? '<div class="notice warn"><i class="fa-solid fa-triangle-exclamation"></i><span><b>Temporary storage:</b> no database is connected, so accounts and balances will be wiped. Connect a Postgres database (see README) to keep data.</span></div>' : ''}
+        ${c.ephemeral ? EPHEMERAL_NOTICE : ''}
         ${c.maintenance ? '<div class="notice bad"><i class="fa-solid fa-screwdriver-wrench"></i><span>Maintenance mode is on. Only admins can use the site.</span></div>' : ''}
         ${c.announcement && !inAdmin ? `<div class="notice"><i class="fa-solid fa-bullhorn"></i><span>${esc(c.announcement)}</span></div>` : ''}
         ${inAdmin ? '' : `<div class="ticker-bar"><div class="ticker" id="ticker">${tickerHTML()}</div></div>`}
-        <main class="content page-in" id="content">${content || ''}</main>
+        <main class="content" id="content"></main>
       </div>
     </div>`;
-    afterRender();
+    } else {
+      $$('.nav-item[data-path]').forEach((a) => a.classList.toggle('active', isActive(a.dataset.path)));
+      if (u) showBalance(u.balance);
+    }
+    setContent(content || '');
   }
 
   const page = shell;
@@ -854,6 +1013,31 @@
     }
   }
 
+  /* ================================================================= games */
+
+  const GAMES = [
+    ['fa-coins', 'Coin Flip', 'Call it in the air.'],
+    ['fa-dice', 'Dice', 'Pick your odds, roll it.'],
+    ['fa-dharmachakra', 'Daily Wheel', 'One free spin every day.'],
+    ['fa-ticket', 'Scratch Cards', 'Scratch to reveal.'],
+    ['fa-brain', 'Trivia', 'Quick questions, quick rewards.'],
+    ['fa-trophy', 'Tournaments', 'Weekly prize pools.'],
+  ];
+
+  function pageGames() {
+    page(`<div class="press quiet games-hero" data-reveal>
+        <div class="games-dice"><i class="fa-solid fa-dice-five"></i><i class="fa-solid fa-dice-three"></i></div>
+        <span class="sticker"><i class="fa-solid fa-hourglass-half"></i> Coming soon</span>
+        <h1 class="mt-16">Games are on the way</h1>
+        <p class="muted mt-8">Quick games you can play with your balance, plus free daily ones. We're putting the finishing touches on them now.</p>
+      </div>
+      <div class="sec-title"><i class="fa-solid fa-gamepad"></i> What's coming</div>
+      <div class="games-grid">${GAMES.map(([ic, name, sub]) => `<div class="press quiet game-card" data-reveal>
+        <span class="game-lock"><i class="fa-solid fa-lock"></i></span>
+        <span class="game-icon"><i class="fa-solid ${ic}"></i></span>
+        <b>${name}</b><small>${sub}</small><span class="badge b-gold mt-8">Soon</span></div>`).join('')}</div>`);
+  }
+
   /* =============================================================== cashout */
 
   async function pageCashout() {
@@ -1013,17 +1197,69 @@
 
     const out = $('#profile-tab');
     if (tab === 'settings') {
-      out.innerHTML = `<div class="panel" style="max-width:520px"><h3>Change password</h3>
-        <form id="pw-f" class="mt-16"><div id="pw-err"></div>
-          <div class="field"><label>Current password</label><input class="input" type="password" name="current" autocomplete="current-password"></div>
-          <div class="field"><label>New password</label><input class="input" type="password" name="next" autocomplete="new-password"></div>
-          <button class="btn btn-gold">Update password</button></form></div>`;
+      out.innerHTML = `<div class="settings-grid">
+        <div class="panel"><h3><i class="fa-solid fa-key gold"></i> Change password</h3>
+          <p class="faint" style="font-size:13px;margin:4px 0 14px">Other devices are signed out when you change it.</p>
+          <form id="pw-f"><div id="pw-err"></div>
+            <div class="field"><label>Current password</label><input class="input" type="password" name="current" autocomplete="current-password"></div>
+            <div class="field"><label>New password</label><input class="input" type="password" name="next" autocomplete="new-password" placeholder="At least 8 characters"></div>
+            <button class="btn btn-gold">Update password</button></form></div>
+        <div class="panel"><h3><i class="fa-solid fa-envelope gold"></i> Email</h3>
+          <p class="faint" style="font-size:13px;margin:4px 0 14px">Password reset links go here.</p>
+          <form id="em-f"><div id="em-err"></div>
+            <div class="field"><label>Email</label><input class="input" type="email" name="email" value="${esc(u.email)}" autocomplete="email"></div>
+            <div class="field"><label>Your password</label><input class="input" type="password" name="password" autocomplete="current-password"></div>
+            <button class="btn btn-gold">Update email</button></form></div>
+        <div class="panel" style="grid-column:1/-1"><div class="row wrap"><h3><i class="fa-solid fa-laptop gold"></i> Where you're logged in</h3><span class="spacer"></span>
+          <button class="btn btn-sm btn-danger" id="ss-others">Sign out everywhere else</button></div>
+          <div id="ss-list" class="mt-16">${skels(1, 80)}</div></div>
+      </div>`;
       $('#pw-f').addEventListener('submit', async (e) => {
         e.preventDefault();
         await withBusy($('button', e.target), async () => {
-          try { await api('/me/password', { body: formData(e.target) }); e.target.reset(); $('#pw-err').innerHTML = ''; toast('Password updated.', 'success'); } catch (err) { $('#pw-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+          try {
+            const r = await api('/me/password', { body: formData(e.target) });
+            e.target.reset(); $('#pw-err').innerHTML = ''; toast(r.message, 'success'); loadSessions();
+          } catch (err) { $('#pw-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
         });
       });
+      $('#em-f').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await withBusy($('button', e.target), async () => {
+          try {
+            const r = await api('/me/email', { body: formData(e.target) });
+            state.user = r.user; e.target.password.value = ''; $('#em-err').innerHTML = ''; toast('Email updated.', 'success');
+          } catch (err) { $('#em-err').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+        });
+      });
+      $('#ss-others').addEventListener('click', async () => {
+        if (!(await confirmModal('Sign out everywhere else?', 'Every other browser and device will need to log in again.', 'Sign them out', true))) return;
+        await api('/me/sessions/revoke-others', { body: {} });
+        toast('Signed out everywhere else.', 'success'); loadSessions();
+      });
+      const device = (ua) => {
+        const b = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+        const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'unknown device';
+        const ic = /iPhone|Android/.test(ua) ? 'fa-mobile-screen-button' : 'fa-desktop';
+        return [ic, `${b} on ${os}`];
+      };
+      const loadSessions = async () => {
+        const { sessions } = await api('/me/sessions');
+        const el = $('#ss-list');
+        if (!el) return;
+        el.innerHTML = sessions.map((x) => {
+          const [ic, name] = device(x.user_agent || '');
+          return `<div class="session-row"><span class="si"><i class="fa-solid ${ic}"></i></span>
+            <div style="flex:1;min-width:0"><b>${esc(name)}</b> ${x.current ? '<span class="badge b-green">This device</span>' : ''}
+              <div class="faint" style="font-size:12px">${esc(x.ip || 'unknown IP')} · active ${esc(dateTime(x.last_seen_at))} · signed in ${esc(date(x.created_at))}</div></div>
+            ${x.current ? '' : `<button class="btn btn-sm" data-revoke="${esc(x.id)}">Sign out</button>`}</div>`;
+        }).join('') || emptyHTML('No active sessions.');
+        $$('[data-revoke]', el).forEach((btn) => btn.addEventListener('click', async () => {
+          await api(`/me/sessions/${btn.dataset.revoke}`, { method: 'DELETE' });
+          toast('Signed out that device.', 'success'); loadSessions();
+        }));
+      };
+      loadSessions().catch((err) => toast(err.message, 'error'));
       return;
     }
     try {
@@ -1052,6 +1288,7 @@
     users: adminUsers,
     walls: adminWalls,
     logs: adminLogs,
+    audit: adminAudit,
     completions: adminCompletions,
     withdrawals: adminWithdrawals,
     methods: adminMethods,
@@ -1104,7 +1341,9 @@
     setContent(`${adminHead('Users', 'Search, adjust balances, ban and promote.')}
       <div class="toolbar"><div class="input-icon" style="width:min(100%,340px)"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="u-search" placeholder="Username, email or ID"></div></div><div id="u-table"></div>`);
     const load = async () => {
+      if (!$('#u-search')) return; // left the page
       const { users } = await api(`/admin/users?q=${encodeURIComponent($('#u-search').value)}`);
+      if (!$('#u-table')) return;
       $('#u-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>ID</th><th>User</th><th>Balance</th><th>Earned</th><th>Refs</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>
         ${users.map((u) => `<tr><td class="faint">#${u.id}</td>
           <td><b>${esc(u.username)}</b> ${u.role === 'admin' ? '<span class="admin-tag">ADMIN</span>' : ''} ${u.is_demo ? '<span class="badge b-gray">demo</span>' : ''}<div class="faint" style="font-size:12px">${esc(u.email)}</div></td>
@@ -1121,7 +1360,7 @@
   }
 
   async function manageUser(id, reload) {
-    const { user: u, transactions, withdrawals } = await api(`/admin/users/${id}`);
+    const { user: u, transactions, withdrawals, same_ip: sameIp, sessions } = await api(`/admin/users/${id}`);
     openModal(`<div class="modal-body">
       <div class="row" style="margin-bottom:20px;padding-right:40px">${avatar(u.username, '#eac837', 'lg')}<div><h2 style="font-size:24px;color:#fff">${esc(u.username)}</h2><div class="faint">${esc(u.email)} · #${u.id}</div>
         <div class="mt-8"><span class="money">${money(u.balance)}</span> <span class="faint">balance</span> · <span class="money green">${money(u.total_earned)}</span> <span class="faint">earned</span></div></div></div>
@@ -1136,6 +1375,19 @@
           <form id="upw-f" class="row mt-16"><input class="input" name="password" type="password" placeholder="New password" style="padding:7px 10px"><button class="btn btn-sm">Set</button></form>
           <button class="btn btn-danger btn-sm btn-block mt-16" id="u-del">Delete user</button>
         </div>
+      </div>
+      <div class="panel mt-16" style="background:var(--bg)"><h3>Login & security</h3>
+        <div class="faint mt-8" style="font-size:13px;line-height:1.8">
+          Signed up from <span class="code inline">${esc(u.signup_ip || 'unknown')}</span> · last seen from <span class="code inline">${esc(u.last_ip || 'unknown')}</span><br>
+          Last login ${u.last_login_at ? esc(dateTime(u.last_login_at)) : 'never'} · ${fmt(sessions)} active session${sessions === 1 ? '' : 's'}
+          ${u.locked_until && u.locked_until > Date.now() ? `<br><span class="red">Locked after failed logins until ${esc(dateTime(u.locked_until))}</span>` : ''}
+          ${sameIp.length ? `<br><span class="gold"><i class="fa-solid fa-triangle-exclamation"></i> Same IP as:</span> ${sameIp.map((x) => `<b>${esc(x.username)}</b>${x.banned ? ' (banned)' : ''}`).join(', ')}` : ''}
+        </div>
+        <div class="row wrap mt-16" style="gap:8px">
+          <button class="btn btn-sm" id="u-reset"><i class="fa-solid fa-link"></i> Create password reset link</button>
+          <button class="btn btn-sm" id="u-logout"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out everywhere</button>
+        </div>
+        <div id="u-reset-out"></div>
       </div>
       <h3 class="mt-24">Recent activity</h3>
       <div class="table-wrap mt-8" style="max-height:220px;overflow:auto"><table><tbody>
@@ -1157,6 +1409,20 @@
         manageUser(id, reload);
         if (state.user.id === id) refreshMe();
       } catch (err) { toast(err.message, 'error'); }
+    });
+    $('#u-reset').addEventListener('click', async () => {
+      try {
+        const r = await api(`/admin/users/${id}/reset-link`, { body: {} });
+        $('#u-reset-out').innerHTML = `<p class="faint mt-16" style="font-size:13px">Send this to ${esc(u.username)}. It works once, for ${r.expires_in_minutes} minutes.</p>
+          <div class="copy-box mt-8"><input class="input mono" readonly value="${esc(r.url)}" id="u-reset-url"><button class="btn btn-gold" id="u-reset-copy"><i class="fa-solid fa-copy"></i></button></div>`;
+        $('#u-reset-copy').addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText($('#u-reset-url').value); } catch { $('#u-reset-url').select(); document.execCommand('copy'); }
+          toast('Link copied.', 'success');
+        });
+      } catch (err) { toast(err.message, 'error'); }
+    });
+    $('#u-logout').addEventListener('click', async () => {
+      try { await api(`/admin/users/${id}/logout`, { body: {} }); toast('Signed out everywhere.', 'success'); } catch (err) { toast(err.message, 'error'); }
     });
     $('#u-ban').addEventListener('change', (e) => patch({ banned: e.target.checked }, e.target.checked ? 'User banned.' : 'User unbanned.'));
     $('#u-admin').addEventListener('change', (e) => patch({ role: e.target.checked ? 'admin' : 'user' }, 'Role updated.'));
@@ -1482,6 +1748,16 @@
     }));
   }
 
+  async function adminAudit() {
+    const { entries } = await api('/admin/audit');
+    setContent(`${adminHead('Audit log', 'Every change made in the admin panel, and who made it.')}
+      <div class="table-wrap"><table><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th><th>IP</th></tr></thead><tbody>
+      ${entries.map((e) => `<tr><td class="faint nowrap">${dateTime(e.created_at)}</td><td><b>${esc(e.admin_name || 'deleted')}</b></td><td>${esc(e.action)}<div class="faint mono" style="font-size:11px">${esc(e.target)}</div></td>
+        <td><details><summary class="faint" style="cursor:pointer;font-size:12px">View</summary><div class="code mt-8">${esc(e.details)}</div></details></td><td class="faint mono" style="font-size:12px">${esc(e.ip)}</td></tr>`).join('')
+        || `<tr><td colspan="5">${emptyHTML('No admin actions yet.', 'fa-clipboard-list')}</td></tr>`}
+      </tbody></table></div>`);
+  }
+
   async function adminTransactions() {
     const { transactions } = await api('/admin/transactions');
     setContent(`${adminHead('Transactions', 'The latest 300 balance changes.')}
@@ -1503,6 +1779,7 @@
           ${row('site_name', 'Site name', 'Shown in the header and page title.')}
           ${row('announcement', 'Announcement bar', 'Shown at the top of every page. Leave empty to hide it.')}
           ${toggle('maintenance', 'Maintenance mode', 'Blocks everyone except admins.')}
+          ${row('max_accounts_per_ip', 'Max accounts per IP', 'Stops people making lots of accounts from one network. 0 = no limit. Shared networks (schools, offices) may hit this.', 'number', s.max_accounts_per_ip || 0, 'min="0" max="100"')}
         </div>
         <div class="panel mt-24"><h3>Money</h3>
           ${row('signup_bonus', 'Sign-up bonus (USD)', 'Added when someone creates an account.', 'number', dollars(s.signup_bonus), 'min="0" step="0.01"')}

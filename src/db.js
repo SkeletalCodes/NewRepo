@@ -224,6 +224,29 @@ const SCHEMA = [
     created_at BIGINT NOT NULL
   )`,
   'CREATE INDEX IF NOT EXISTS idx_pb_wall ON postback_logs(offerwall_id, id)',
+  `CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at BIGINT NOT NULL,
+    used_at BIGINT,
+    ip TEXT NOT NULL DEFAULT '',
+    created_at BIGINT NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_pr_user ON password_resets(user_id)',
+  `CREATE TABLE IF NOT EXISTS rate_limits (
+    key TEXT PRIMARY KEY,
+    count INTEGER NOT NULL,
+    reset_at BIGINT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS audit_log (
+    id ${ID},
+    admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '',
+    ip TEXT NOT NULL DEFAULT '',
+    created_at BIGINT NOT NULL
+  )`,
   'CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id, created_at)',
   'CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at)',
   'CREATE INDEX IF NOT EXISTS idx_oc_user ON offer_completions(user_id)',
@@ -237,6 +260,19 @@ const SCHEMA = [
  * so the CREATE TABLE statements above stay as they were.
  */
 const ADDED_COLUMNS = {
+  users: [
+    ['signup_ip', "TEXT NOT NULL DEFAULT ''"],
+    ['last_ip', "TEXT NOT NULL DEFAULT ''"],
+    ['failed_logins', 'INTEGER NOT NULL DEFAULT 0'],
+    ['locked_until', 'BIGINT'],
+    ['password_changed_at', 'BIGINT'],
+  ],
+  sessions: [
+    ['ip', "TEXT NOT NULL DEFAULT ''"],
+    ['user_agent', "TEXT NOT NULL DEFAULT ''"],
+    ['last_seen_at', 'BIGINT NOT NULL DEFAULT 0'],
+    ['remember', 'INTEGER NOT NULL DEFAULT 1'],
+  ],
   offerwalls: [
     // Integration
     ['preset', "TEXT NOT NULL DEFAULT 'custom'"],
@@ -289,6 +325,7 @@ const DEFAULT_SETTINGS = {
   referral_percent: '10',
   announcement: 'New here? Use code WELCOME for a free bonus.',
   maintenance: '0',
+  max_accounts_per_ip: '0', // 0 = no limit
 };
 
 /** Create tables and default settings. Safe to run concurrently (serverless cold starts). */
@@ -302,6 +339,8 @@ async function migrate() {
       }
     }
     await t.run('CREATE INDEX IF NOT EXISTS idx_oc_release ON offer_completions(status, release_at)');
+    await t.run('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+    await t.run('CREATE INDEX IF NOT EXISTS idx_users_signup_ip ON users(signup_ip)');
     const defaults = DEFAULT_SETTINGS;
     for (const [k, v] of Object.entries(defaults)) {
       await t.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING', k, v);

@@ -230,12 +230,16 @@ async function releaseHeld() {
 }
 
 let lastHousekeeping = 0;
-/** Release holds and trim old logs at most once a minute per server instance. */
+/** Release holds and clear out expired rows, at most once a minute per server instance. */
 function housekeeping() {
   if (Date.now() - lastHousekeeping < 60_000) return;
   lastHousekeeping = Date.now();
   releaseHeld().catch((err) => console.error('releaseHeld failed', err));
-  db.run('DELETE FROM postback_logs WHERE created_at < ?', Date.now() - 30 * 86400_000).catch(() => {});
+  const now = Date.now();
+  db.run('DELETE FROM postback_logs WHERE created_at < ?', now - 30 * 86400_000).catch(() => {});
+  db.run('DELETE FROM sessions WHERE expires_at < ?', now).catch(() => {});
+  db.run('DELETE FROM password_resets WHERE expires_at < ?', now - 86400_000).catch(() => {});
+  db.run('DELETE FROM rate_limits WHERE reset_at < ?', now).catch(() => {});
 }
 
 /** Build a correctly signed test postback for a wall, the way the network would send it. */

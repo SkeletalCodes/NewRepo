@@ -2,18 +2,20 @@
 
 const crypto = require('node:crypto');
 const express = require('express');
-const { db, credit, debit, getSettings, getSetting, EPHEMERAL } = require('./db');
+const { db, credit, debit, getSettings, getSetting, EPHEMERAL, IS_PG } = require('./db');
 const {
-  hashPassword, verifyPassword, createSession, destroySession,
-  requireUser, rateLimit, publicUser,
+  hashPassword, verifyPassword, fakeVerify, passwordProblem, createSession, destroySession, destroyOtherSessions,
+  requireUser, rateLimit, sharedLimit, hit, publicUser, lockedMinutes, recordFailedLogin,
+  createResetToken, findResetToken, consumeResetToken,
 } = require('./auth');
+const { mailConfigured, sendMail, layout } = require('./mail');
 
 const router = express.Router();
 
 const AVATAR_COLORS = ['#7c5cff', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#3b82f6', '#a855f7'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40 });
 const actionLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, key: (req) => `u${req.user ? req.user.id : req.ip}` });
 
 function bad(res, msg, code = 400) {
@@ -50,8 +52,16 @@ router.get('/config', async (req, res) => {
     announcement: s.announcement,
     maintenance: s.maintenance === '1',
     ephemeral: EPHEMERAL,
+    mail_enabled: mailConfigured(),
     user: publicUser(req.user),
   });
+});
+
+/** For uptime monitors. */
+router.get('/health', async (_req, res) => {
+  const started = Date.now();
+  await db.get('SELECT 1 AS ok');
+  res.json({ ok: true, database: IS_PG ? 'postgres' : 'sqlite', persistent: !EPHEMERAL, db_ms: Date.now() - started });
 });
 
 router.get('/stats', async (_req, res) => {
@@ -67,19 +77,32 @@ router.get('/stats', async (_req, res) => {
 
 /* ------------------------------------------------------------------ auth */
 
-router.post('/auth/register', authLimiter, async (req, res) => {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MIN = 60 * 1000;
+const ipKey = (req) => req.ip || 'unknown';
+
+const siteUrl = (req) => (process.env.SITE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+
+router.post('/auth/register', authLimiter, sharedLimit('register', 10, 60 * MIN, ipKey), async (req, res) => {
   const username = String(req.body.username || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
   const referral = String(req.body.referral || '').trim().toUpperCase();
 
   if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) return bad(res, 'Username must be 3-20 letters, numbers or underscores.');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254) return bad(res, 'Please enter a valid email address.');
-  if (password.length < 8 || password.length > 128) return bad(res, 'Password must be at least 8 characters.');
+  if (!EMAIL_RE.test(email) || email.length > 254) return bad(res, 'Please enter a valid email address.');
+  const pwProblem = passwordProblem(password);
+  if (pwProblem) return bad(res, pwProblem);
   if (!req.body.terms) return bad(res, 'You must accept the Terms of Service.');
 
   if (await db.get('SELECT 1 AS x FROM users WHERE lower(username) = lower(?)', username)) return bad(res, 'That username is taken.');
-  if (await db.get('SELECT 1 AS x FROM users WHERE lower(email) = ?', email)) return bad(res, 'An account with that email already exists.');
+  if (await db.get('SELECT 1 AS x FROM users WHERE lower(email) = ?', email)) return bad(res, 'An account with that email already exists. Try logging in, or reset your password.');
+
+  const maxPerIp = Number(await getSetting('max_accounts_per_ip')) || 0;
+  if (maxPerIp > 0 && req.ip) {
+    const n = (await db.get('SELECT COUNT(*) AS n FROM users WHERE signup_ip = ?', req.ip)).n;
+    if (n >= maxPerIp) return bad(res, 'Too many accounts have been created from your network. One account per person, please.');
+  }
 
   let referrer = null;
   if (referral) {
@@ -94,11 +117,11 @@ router.post('/auth/register', authLimiter, async (req, res) => {
     id = await db.tx(async (t) => {
       const hasAdmin = await t.get("SELECT 1 AS x FROM users WHERE role = 'admin'");
       const row = await t.get(`INSERT INTO users
-        (username, email, password_hash, role, referral_code, referred_by, avatar_color, created_at, last_login_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        (username, email, password_hash, role, referral_code, referred_by, avatar_color, created_at, signup_ip, password_changed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       username, email, passwordHash, hasAdmin ? 'user' : 'admin', code,
       referrer ? referrer.id : null, AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-      Date.now(), Date.now());
+      Date.now(), String(req.ip || '').slice(0, 64), Date.now());
       const bonus = Number(await getSetting('signup_bonus', t)) || 0;
       if (bonus > 0) await credit(t, row.id, bonus, 'bonus', 'Welcome bonus');
       return row.id;
@@ -108,26 +131,91 @@ router.post('/auth/register', authLimiter, async (req, res) => {
     throw err;
   }
 
-  await createSession(res, id);
+  await createSession(req, res, id, { remember: true });
   res.json({ user: publicUser(await getUser(id)) });
 });
 
-router.post('/auth/login', authLimiter, async (req, res) => {
-  const login = String(req.body.login || '').trim();
-  const password = String(req.body.password || '');
-  if (!login || !password) return bad(res, 'Enter your username/email and password.');
+router.post('/auth/login', authLimiter, sharedLimit('login-ip', 30, 15 * MIN, ipKey), async (req, res) => {
+  const login = String(req.body.login || '').trim().slice(0, 254);
+  const password = String(req.body.password || '').slice(0, 200);
+  if (!login || !password) return bad(res, 'Enter your username or email, and your password.');
   const user = await db.get('SELECT * FROM users WHERE (lower(username) = lower(?) OR lower(email) = lower(?)) AND is_demo = 0', login, login);
-  if (!user || !verifyPassword(password, user.password_hash)) return bad(res, 'Incorrect username/email or password.', 401);
-  if (user.banned) return bad(res, 'This account has been suspended.', 403);
-  await db.run('UPDATE users SET last_login_at = ? WHERE id = ?', Date.now(), user.id);
-  await createSession(res, user.id);
-  res.json({ user: publicUser(user) });
+  if (!user) {
+    fakeVerify();
+    return bad(res, 'That username/email and password don\'t match. Check for typos, or reset your password.', 401);
+  }
+  const locked = lockedMinutes(user);
+  if (locked) return bad(res, `Too many wrong passwords. This account is locked for ${locked} more minute${locked === 1 ? '' : 's'}, or you can reset your password.`, 429);
+  if (!verifyPassword(password, user.password_hash)) {
+    const nowLocked = await recordFailedLogin(user);
+    return bad(res, nowLocked
+      ? 'Too many wrong passwords. This account is locked for 15 minutes, or you can reset your password.'
+      : 'That username/email and password don\'t match. Check for typos, or reset your password.', 401);
+  }
+  if (user.banned) return bad(res, 'This account has been suspended. Contact support if you think this is a mistake.', 403);
+  await createSession(req, res, user.id, { remember: req.body.remember !== false });
+  res.json({ user: publicUser(await getUser(user.id)) });
 });
 
 router.post('/auth/logout', async (req, res) => {
   await destroySession(req, res);
   res.json({ ok: true });
 });
+
+const RESET_SENT = 'If an account uses that email, a reset link is on its way. It works for 1 hour. Check your spam folder too.';
+
+/** Request a reset link. Always answers the same way so it can't be used to find accounts. */
+router.post('/auth/forgot', authLimiter, sharedLimit('forgot-ip', 10, 60 * MIN, ipKey), async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(email) || email.length > 254) return bad(res, 'Please enter a valid email address.');
+  if (!mailConfigured()) {
+    return res.json({ ok: true, mail: false, message: "Email isn't set up on this site yet. Contact support and they can send you a reset link." });
+  }
+  if (!(await hit(`forgot-email:${email}`, 3, 60 * MIN))) return res.json({ ok: true, mail: true, message: RESET_SENT });
+  const user = await db.get('SELECT id, username, email, banned FROM users WHERE lower(email) = ? AND is_demo = 0', email);
+  if (user && !user.banned) {
+    const token = await createResetToken(user.id, req.ip);
+    const siteName = await getSetting('site_name');
+    const url = `${siteUrl(req)}/#/reset/${token}`;
+    const msg = layout({
+      siteName,
+      heading: 'Reset your password',
+      body: `Hi ${user.username}, someone (hopefully you) asked to reset the password for your ${siteName} account. Click below to choose a new one.`,
+      button: 'Choose a new password',
+      url,
+      footer: "This link works for 1 hour and only once. If you didn't ask for this, you can ignore this email; your password won't change.",
+    });
+    try {
+      await sendMail({ to: user.email, subject: `Reset your ${siteName} password`, ...msg });
+    } catch (err) {
+      console.error('Password reset email failed:', err.message);
+    }
+  }
+  res.json({ ok: true, mail: true, message: RESET_SENT });
+});
+
+router.get('/auth/reset/:token', sharedLimit('reset-check', 30, 15 * MIN, ipKey), async (req, res) => {
+  const r = await findResetToken(req.params.token);
+  if (!r || r.banned) return bad(res, 'This reset link is invalid or has expired. Request a new one.', 404);
+  res.json({ ok: true, username: r.username });
+});
+
+router.post('/auth/reset', authLimiter, sharedLimit('reset', 10, 15 * MIN, ipKey), async (req, res) => {
+  const token = String(req.body.token || '');
+  const password = String(req.body.password || '');
+  const pwProblem = passwordProblem(password);
+  if (pwProblem) return bad(res, pwProblem);
+  const r = await findResetToken(token);
+  if (!r || r.banned) return bad(res, 'This reset link is invalid or has expired. Request a new one.', 404);
+  if (!(await consumeResetToken(token))) return bad(res, 'This reset link has already been used. Request a new one.', 404);
+  await db.run('UPDATE users SET password_hash = ?, password_changed_at = ?, failed_logins = 0, locked_until = NULL WHERE id = ?',
+    hashPassword(password), Date.now(), r.user_id);
+  await destroyOtherSessions(r.user_id); // sign out everywhere, then log in here
+  await createSession(req, res, r.user_id, { remember: true });
+  res.json({ user: publicUser(await getUser(r.user_id)) });
+});
+
+/* ---------------------------------------------------------------- account */
 
 router.get('/me', requireUser, (req, res) => res.json({ user: publicUser(req.user) }));
 
@@ -139,9 +227,50 @@ router.post('/me/onboarded', requireUser, async (req, res) => {
 router.post('/me/password', requireUser, authLimiter, async (req, res) => {
   const current = String(req.body.current || '');
   const next = String(req.body.next || '');
-  if (!verifyPassword(current, req.user.password_hash)) return bad(res, 'Current password is incorrect.');
-  if (next.length < 8 || next.length > 128) return bad(res, 'New password must be at least 8 characters.');
-  await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(next), req.user.id);
+  if (!verifyPassword(current, req.user.password_hash)) return bad(res, 'Your current password is incorrect.');
+  const pwProblem = passwordProblem(next);
+  if (pwProblem) return bad(res, pwProblem);
+  if (current === next) return bad(res, 'Pick a password different from your current one.');
+  await db.run('UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?', hashPassword(next), Date.now(), req.user.id);
+  await destroyOtherSessions(req.user.id, req.sessionHash);
+  res.json({ ok: true, message: 'Password updated. Other devices have been signed out.' });
+});
+
+router.post('/me/email', requireUser, authLimiter, async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!verifyPassword(String(req.body.password || ''), req.user.password_hash)) return bad(res, 'Your password is incorrect.');
+  if (!EMAIL_RE.test(email) || email.length > 254) return bad(res, 'Please enter a valid email address.');
+  if (await db.get('SELECT 1 AS x FROM users WHERE lower(email) = ? AND id != ?', email, req.user.id)) return bad(res, 'Another account already uses that email.');
+  await db.run('UPDATE users SET email = ? WHERE id = ?', email, req.user.id);
+  res.json({ user: publicUser(await getUser(req.user.id)) });
+});
+
+const sessionId = (hash) => hash.slice(0, 16);
+
+router.get('/me/sessions', requireUser, async (req, res) => {
+  const rows = await db.all('SELECT token_hash, ip, user_agent, created_at, last_seen_at, expires_at FROM sessions WHERE user_id = ? AND expires_at > ? ORDER BY last_seen_at DESC',
+    req.user.id, Date.now());
+  res.json({
+    sessions: rows.map((r) => ({
+      id: sessionId(r.token_hash), ip: r.ip, user_agent: r.user_agent, created_at: r.created_at,
+      last_seen_at: r.last_seen_at || r.created_at, expires_at: r.expires_at, current: r.token_hash === req.sessionHash,
+    })),
+  });
+});
+
+router.delete('/me/sessions/:id', requireUser, async (req, res) => {
+  const id = String(req.params.id);
+  if (!/^[0-9a-f]{16}$/.test(id)) return bad(res, 'Unknown session.', 404);
+  const rows = await db.all('SELECT token_hash FROM sessions WHERE user_id = ?', req.user.id);
+  const match = rows.find((r) => sessionId(r.token_hash) === id);
+  if (!match) return bad(res, 'Unknown session.', 404);
+  await db.run('DELETE FROM sessions WHERE token_hash = ?', match.token_hash);
+  if (match.token_hash === req.sessionHash) res.clearCookie('gr_session', { path: '/' });
+  res.json({ ok: true });
+});
+
+router.post('/me/sessions/revoke-others', requireUser, async (req, res) => {
+  await destroyOtherSessions(req.user.id, req.sessionHash);
   res.json({ ok: true });
 });
 
