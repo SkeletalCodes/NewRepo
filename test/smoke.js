@@ -257,7 +257,7 @@ async function postback(url, opts) {
     assert.equal(bal, 10025);
 
     const cfg = (await g('/games/config')).data;
-    assert.equal(cfg.games.length, 16, '16 games, no slots');
+    assert.equal(cfg.games.length, 20, '20 games, no slots');
     assert.ok(!cfg.games.some((x) => /slot/i.test(x.id)));
 
     const fair = (await g('/games/fair')).data;
@@ -286,7 +286,7 @@ async function postback(url, opts) {
     const instant = {
       limbo: { target: 2 }, coinflip: { side: 'heads', risk: 'medium' }, double: { pick: 'red' }, diamonds: { risk: 'low' },
       wheel: { risk: 'medium', segments: 20 }, plinko: { rows: 16, risk: 'high' }, keno: { picks: [1, 5, 9, 22, 40], risk: 'medium' },
-      baccarat: { side: 'banker' },
+      baccarat: { side: 'banker' }, cases: { risk: 'high' }, dragontiger: { side: 'tie' },
     };
     for (const [game, params] of Object.entries(instant)) {
       r = await g(`/games/${game}/bet`, { amount: 50, params });
@@ -340,6 +340,29 @@ async function postback(url, opts) {
     r = await g(`/games/bets/${cb.id}/action`, { action: 'poll' });
     assert.equal(r.data.bet.status, 'settled');
     assert.ok([0, 101].includes(r.data.bet.payout), JSON.stringify(r.data.bet));
+    // video poker: dealt hand only, then the draw replaces exactly the cards not held
+    r = await g('/games/videopoker/bet', { amount: 100, params: {} });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const vp = r.data.bet;
+    assert.equal(vp.status, 'active');
+    assert.equal(vp.view.dealt.length, 5);
+    assert.ok(!('hand' in vp.view) && !('cards' in vp.view), 'replacement cards stay on the server');
+    r = await g(`/games/bets/${vp.id}/action`, { action: 'draw', params: { hold: [0, 2] } });
+    const vpd = r.data.bet;
+    assert.equal(vpd.status, 'settled');
+    assert.deepEqual(vpd.view.hand[0], vp.view.dealt[0]);
+    assert.deepEqual(vpd.view.hand[2], vp.view.dealt[2]);
+    assert.equal(vpd.payout, 100 * { royal: 800, straight_flush: 50, four: 25, full: 9, flush: 6, straight: 4, three: 3, two_pair: 2, jacks: 1, none: 0 }[vpd.view.result]);
+    // chicken: death lane hidden until the end
+    r = await g('/games/chicken/bet', { amount: 100, params: { difficulty: 'easy' } });
+    let ck = r.data.bet;
+    assert.ok(!('death' in ck.view), 'the losing lane stays on the server');
+    r = await g(`/games/bets/${ck.id}/action`, { action: 'step' });
+    ck = r.data.bet;
+    if (ck.status === 'active') {
+      r = await g(`/games/bets/${ck.id}/action`, { action: 'cashout' });
+      assert.equal(r.data.bet.payout, Math.floor(100 * 1.02 + 1e-9), 'one easy lane pays 1.02×');
+    } else assert.equal(ck.payout, 0);
     // towers, pump, hilo start and move
     for (const [game, params, move] of [['towers', { difficulty: 'easy' }, { action: 'pick', params: { col: 0 } }], ['pump', { difficulty: 'easy' }, { action: 'pump' }], ['hilo', {}, { action: 'hi' }]]) {
       r = await g(`/games/${game}/bet`, { amount: 50, params });
@@ -358,13 +381,15 @@ async function postback(url, opts) {
     assert.ok(settledBets.length >= 10);
     assert.equal(me.total_earned, 25 + 0, 'game winnings are not "earned"');
 
-    // max win cap
-    await admin('/admin/settings', { games_max_win: 150 }, 'PUT');
-    for (let i = 0; i < 6; i++) {
-      r = await g('/games/limbo/bet', { amount: 100, params: { target: 2 } });
-      if (r.data.bet.payout) { assert.equal(r.data.bet.payout, 150, 'payout capped at max win'); break; }
+    // no max win: a 37× on $100 pays $3,700 (the house would need the balance for that, so give it some)
+    await admin(`/admin/users/${gid}/balance`, { amount: 1_000_000 });
+    await admin('/admin/settings', { games_max_bet: 1_000_000 }, 'PUT');
+    for (let i = 0; i < 80; i++) {
+      r = await g('/games/limbo/bet', { amount: 10000, params: { target: 37 } });
+      assert.equal(r.status, 200, JSON.stringify(r.data));
+      if (r.data.bet.payout) { assert.equal(r.data.bet.payout, 370000, '37× on $100 pays $3,700 in full'); break; }
     }
-    await admin('/admin/settings', { games_max_win: 100000 }, 'PUT');
+    await admin('/admin/settings', { games_max_bet: 10000 }, 'PUT');
 
     // rotate, then the old server seed is revealed and the dice result verifies
     assert.equal((await g('/games/fair/rotate', { client_seed: 'my-new-seed' })).status, 200);
@@ -373,6 +398,11 @@ async function postback(url, opts) {
     const v = (await client()('/games/verify', { game: 'dice', server_seed: old.server_seed, client_seed: old.client_seed, nonce: old.nonce, params: old.params })).data;
     assert.equal(v.server_hash, old.server_hash, 'hash matches');
     assert.equal(v.result.roll, d1.result.roll, 'verifier reproduces the roll');
+    assert.equal(v.rows.find((x) => x[0] === 'Roll')[1], d1.result.roll.toFixed(2), 'verifier rows show the roll');
+    for (const { id } of cfg.games) {
+      const vr = (await client()('/games/verify', { game: id, server_seed: old.server_seed, client_seed: 'c', nonce: 3 })).data;
+      assert.ok(Array.isArray(vr.rows) && vr.rows.length >= 2, `verify rows for ${id}`);
+    }
     assert.equal((await g('/games/fair')).data.client_seed, 'my-new-seed');
 
     // admin stats

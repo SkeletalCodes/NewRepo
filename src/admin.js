@@ -458,8 +458,8 @@ router.get('/transactions', async (_req, res) => {
 /* -------------------------------------------------------------- settings */
 
 const EDITABLE = ['site_name', 'signup_bonus', 'daily_reward', 'referral_percent', 'announcement', 'maintenance', 'max_accounts_per_ip',
-  'games_enabled', 'games_min_bet', 'games_max_bet', 'games_max_win'];
-const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent', 'max_accounts_per_ip', 'games_min_bet', 'games_max_bet', 'games_max_win'];
+  'games_enabled', 'games_min_bet', 'games_max_bet'];
+const NUMERIC = ['signup_bonus', 'daily_reward', 'referral_percent', 'max_accounts_per_ip', 'games_min_bet', 'games_max_bet'];
 
 router.get('/settings', async (_req, res) => res.json({ settings: await getSettings() }));
 

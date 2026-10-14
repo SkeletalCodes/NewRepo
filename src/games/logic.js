@@ -43,6 +43,7 @@ const dice = {
     const won = mode === 'under' ? roll < target : roll > target;
     return { mult: won ? m : 0, result: { roll, won, chance, payoutMult: m } };
   },
+  verify: (rng) => [['Roll', (Math.floor(rng.float() * 10001) / 100).toFixed(2)]],
 };
 
 const limbo = {
@@ -55,6 +56,10 @@ const limbo = {
   play(rng, { target }) {
     const result = Math.min(1000000, Math.max(1, Math.floor(99 / (1 - rng.float())) / 100));
     return { mult: result >= target ? target : 0, result: { value: result } };
+  },
+  verify(rng) {
+    const v = Math.min(1000000, Math.max(1, Math.floor(99 / (1 - rng.float())) / 100));
+    return [['Result', `${v >= 10000 ? Math.round(v).toLocaleString('en-US') : v.toFixed(2)}×`], ['You win if', 'the result is at or above your target']];
   },
 };
 
@@ -72,6 +77,11 @@ const coinflip = {
     const won = miss < 0;
     return { mult: won ? floor2(0.99 * 2 ** n) : 0, result: { flips: won ? flips : flips.slice(0, miss + 1), need: n } };
   },
+  verify(rng) {
+    const flips = [];
+    for (let i = 0; i < 5; i++) flips.push(rng.float() < 0.5 ? 'Skull' : 'Bones');
+    return [['Flips in order', flips.join('  ·  ')], ['How to read it', 'Skull is heads, bones is tails. A streak of N uses the first N flips and stops at the first miss.']];
+  },
 };
 
 const doubleColor = (n) => (n === 0 ? 'green' : n <= 7 ? 'red' : 'black');
@@ -83,6 +93,11 @@ const double = {
     const n = rng.int(15);
     const color = doubleColor(n);
     return { mult: color === pick ? DOUBLE_PAYS[pick] : 0, result: { n, color } };
+  },
+  verify(rng) {
+    const n = rng.int(15);
+    const c = doubleColor(n);
+    return [['Number drawn (0-14)', String(n)], ['Colour', `${c[0].toUpperCase()}${c.slice(1)} — pays ${DOUBLE_PAYS[c]}×`]];
   },
 };
 
@@ -103,6 +118,12 @@ const diamonds = {
     const hand = DIAMOND_SHAPE[Object.values(count).sort((a, b) => b - a).join('')];
     return { mult: DIAMOND_PAY[risk][hand], result: { gems, hand } };
   },
+  verify(rng) {
+    const { result } = diamonds.play(rng, { risk: 'medium' });
+    const names = ['Red', 'Green', 'Blue', 'Amber', 'Purple', 'Cyan', 'Pink'];
+    const hands = { five: 'Five of a kind', four: 'Four of a kind', full: 'Full house', three: 'Three of a kind', twopair: 'Two pairs', pair: 'One pair', none: 'No match' };
+    return [['Gems drawn, left to right', result.gems.map((i) => names[i]).join(', ')], ['Hand', hands[result.hand]]];
+  },
 };
 
 const WHEEL_BASE = {
@@ -122,6 +143,10 @@ const wheel = {
     const list = wheelSlices(risk, segments);
     const index = rng.int(segments);
     return { mult: list[index], result: { index } };
+  },
+  verify(rng) {
+    const f = rng.float();
+    return [['Winning slice (counted clockwise from the top)', [10, 20, 30, 40, 50].map((n) => `${n} slices: #${Math.floor(f * n) + 1}`).join('  ·  ')]];
   },
 };
 
@@ -152,6 +177,12 @@ const plinko = {
     for (let i = 0; i < rows; i++) path.push(rng.float() < 0.5 ? 0 : 1);
     const bucket = path.reduce((a, b) => a + b, 0);
     return { mult: PLINKO_PAYS[rows][risk][bucket], result: { path, bucket } };
+  },
+  verify(rng) {
+    const path = [];
+    for (let i = 0; i < 16; i++) path.push(rng.float() < 0.5 ? 0 : 1);
+    const at = (n) => path.slice(0, n).reduce((a, b) => a + b, 0) + 1;
+    return [['Path (top peg first)', path.map((d) => (d ? 'R' : 'L')).join('')], ['Bucket, counted from the left', `8 rows: ${at(8)}  ·  12 rows: ${at(12)}  ·  16 rows: ${at(16)}`]];
   },
 };
 
@@ -185,6 +216,12 @@ const keno = {
     for (let i = 0; i < 10; i++) drawn.push(rng.pick(pool));
     const hits = drawn.filter((n) => picks.includes(n)).length;
     return { mult: KENO_PAY[risk][picks.length][hits], result: { drawn, hits } };
+  },
+  verify(rng) {
+    const pool = Array.from({ length: 40 }, (_, i) => i + 1);
+    const drawn = [];
+    for (let i = 0; i < 10; i++) drawn.push(rng.pick(pool));
+    return [['Numbers drawn, in order', drawn.join(', ')]];
   },
 };
 
@@ -233,6 +270,7 @@ const roulette = {
     for (const [k, c] of Object.entries(chips)) if (rouletteWins(k, n)) back += c * roulettePays(k);
     return { mult: back / total, payoutCents: back, result: { n, color: n === 0 ? 'green' : REDS.has(n) ? 'red' : 'black' } };
   },
+  verify(rng) { const n = rng.int(37); return [['Winning number', `${n} (${n === 0 ? 'green' : REDS.has(n) ? 'red' : 'black'})`]]; },
 };
 
 const baccaratVal = (c) => (c.i === 0 ? 1 : c.i >= 9 ? 0 : c.i + 1);
@@ -260,6 +298,12 @@ const baccarat = {
     const winner = pt > bt ? 'player' : bt > pt ? 'banker' : 'tie';
     const mult = winner === side ? BACCARAT_PAYS[side] : winner === 'tie' ? 1 : 0;
     return { mult, result: { player: p, banker: b, pt, bt, winner } };
+  },
+  verify(rng) {
+    const { result: r } = baccarat.play(rng, { side: 'player' });
+    const txt = (cs) => cs.map((c) => c.r + c.s).join('  ');
+    return [['Player hand', `${txt(r.player)}  = ${r.pt}`], ['Banker hand', `${txt(r.banker)}  = ${r.bt}`],
+      ['Result', r.winner === 'tie' ? 'Tie' : `${r.winner === 'player' ? 'Player' : 'Banker'} wins`]];
   },
 };
 
@@ -297,6 +341,9 @@ const mines = {
   view(s, done) {
     return { mines: s.m, revealed: s.revealed, multiplier: s.revealed.length ? minesMult(s.revealed.length, s.m) : 1,
       next: minesMult(s.revealed.length + 1, s.m), ...(done ? { layout: s.layout, hit: s.hit ?? null } : {}) };
+  },
+  verify(rng) {
+    return [['Mine order (tiles 1-25)', mines.start(rng, { mines: 24 }).layout.map((i) => i + 1).join(', ')], ['How to read it', 'An N-mine game uses the first N tiles in this list']];
   },
 };
 
@@ -336,6 +383,11 @@ const towers = {
     return { difficulty: s.d, picks: s.picks, floor: s.picks.length, multiplier: safe ? towersMult(s.d, safe) : 1,
       next: towersMult(s.d, safe + 1), ...(done ? { traps: s.traps } : { traps: s.traps.slice(0, s.picks.length) }) };
   },
+  verify(rng, fresh) {
+    const label = { easy: 'Easy', medium: 'Medium', hard: 'Hard', extreme: 'Extreme' };
+    return Object.keys(TOWER_LEVELS).map((k) => [`${label[k]} — trap column per floor (1 to 8)`,
+      towers.start(fresh(), { difficulty: k }).traps.map((row) => row.map((x) => x + 1).sort().join('+')).join('  ')]);
+  },
 };
 
 const PUMP_N = 25;
@@ -366,6 +418,14 @@ const pump = {
     return { difficulty: s.d, pumps: s.pumps, max: PUMP_N - s.m, popped: !!s.popped, multiplier: s.pumps ? pumpMult(s.pumps, s.m) : 1,
       next: pumpMult(s.pumps + 1, s.m), ...(done ? { safe: s.safe } : {}) };
   },
+  verify(rng, fresh) {
+    const label = { easy: 'Easy', medium: 'Medium', hard: 'Hard', expert: 'Expert' };
+    return Object.keys(PUMP_LEVELS).map((k) => {
+      const s = pump.start(fresh(), { difficulty: k });
+      const max = PUMP_N - s.m;
+      return [`${label[k]} (${s.m} in 25)`, s.safe >= max ? `Never pops — all ${max} pumps are safe` : `Pops on pump ${s.safe + 1} (${s.safe} safe)`];
+    });
+  },
 };
 
 function hiloCalls(i) {
@@ -382,7 +442,7 @@ const hiloTotal = (odds) => floor2(0.99 * odds);
 const hilo = {
   name: 'Hi-Lo', rtp: 99, round: true, calls: hiloCalls,
   check: () => ({}),
-  start(rng) { return { cur: card(rng), odds: 1, steps: 0, trail: [] }; },
+  start(rng) { const c = card(rng); return { cur: c, odds: 1, steps: 0, trail: [{ c, how: 'start' }] }; },
   act(rng, s, action) {
     if (action === 'cashout') {
       if (!s.steps) fail('Make at least one call first.');
@@ -397,7 +457,7 @@ const hilo = {
     const next = card(rng);
     const ok = call.wins(next.i);
     const odds = ok ? s.odds / call.p : s.odds;
-    const st = { ...s, cur: next, odds, steps: s.steps + (ok ? 1 : 0), trail: [...s.trail, { c: next, how: action, ok, label: call.label }].slice(-40) };
+    const st = { ...s, cur: next, odds, steps: s.steps + (ok ? 1 : 0), trail: [...s.trail, { c: next, how: action, ok, label: call.label, m: hiloTotal(odds) }].slice(-40) };
     if (!ok) return { state: { ...st, lost: true }, done: true, mult: 0 };
     return { state: st };
   },
@@ -405,6 +465,11 @@ const hilo = {
     const calls = hiloCalls(s.cur.i);
     return { card: s.cur, steps: s.steps, trail: s.trail, lost: !!s.lost, multiplier: s.lost ? 0 : s.steps ? hiloTotal(s.odds) : 1,
       options: { hi: { label: calls.hi.label, mult: hiloTotal(s.odds / calls.hi.p), chance: calls.hi.p }, lo: { label: calls.lo.label, mult: hiloTotal(s.odds / calls.lo.p), chance: calls.lo.p } } };
+  },
+  verify(rng) {
+    const out = [];
+    for (let i = 0; i < 12; i++) { const c = card(rng); out.push(c.r + c.s); }
+    return [['Cards in order', out.join('  ')], ['How to read it', 'The first card is the starting card; every call or skip takes the next one. Ace is low, King is high.']];
   },
 };
 
@@ -465,6 +530,11 @@ const blackjack = {
       dealer: done ? s.dealer : [s.dealer[0]], dealerTotal: done ? bjTotal(s.dealer) : bjTotal([s.dealer[0]]), hidden: !done };
   },
   total: bjTotal,
+  verify(rng) {
+    const out = [];
+    for (let i = 0; i < 10; i++) { const c = card(rng); out.push(c.r + c.s); }
+    return [['Cards in draw order', out.join('  ')], ['Deal order', 'you, dealer, you, dealer (face down), then each hit']];
+  },
 };
 
 /** Crash: the multiplier is e^(RATE * ms) from the moment the round starts, timed on the server. */
@@ -490,10 +560,156 @@ const crash = {
     return null;
   },
   view(s, done) { return { auto: s.auto, rate: CRASH_RATE, ...(done ? { crashedAt: s.at, cashedAt: s.out || 0 } : {}) }; },
+  verify: (rng) => [['Crash point', `${crash.start(rng, { auto: 0 }).at.toFixed(2)}×`]],
   multAt: crashMultAt,
   timeOf: crashTimeOf,
 };
 
-const GAMES = { blackjack, baccarat, roulette, hilo, keno, dice, limbo, plinko, wheel, diamonds, double, coinflip, crash, mines, towers, pump };
+/* ------------------------------------------------------------- new games */
+
+/** Video Poker, Jacks or Better (9/6 pay table, about 99.5% with good play). One 52-card deck:
+ *  ten cards are drawn up front, the first five are dealt and the rest replace discards in order. */
+const VP_PAYS = { royal: 800, straight_flush: 50, four: 25, full: 9, flush: 6, straight: 4, three: 3, two_pair: 2, jacks: 1, none: 0 };
+const VP_NAMES = { royal: 'Royal flush', straight_flush: 'Straight flush', four: 'Four of a kind', full: 'Full house', flush: 'Flush', straight: 'Straight', three: 'Three of a kind', two_pair: 'Two pair', jacks: 'Jacks or better', none: 'No win' };
+const deckCard = (n) => { const si = Math.floor(n / 13); return { i: n % 13, r: RANKS[n % 13], s: SUITS[si], red: si === 1 || si === 2 }; };
+function vpHand(cards) {
+  const counts = {};
+  cards.forEach((c) => { counts[c.i] = (counts[c.i] || 0) + 1; });
+  const groups = Object.values(counts).sort((a, b) => b - a);
+  const flush = cards.every((c) => c.s === cards[0].s);
+  const vals = [...new Set(cards.map((c) => c.i))].sort((a, b) => a - b);
+  const wheelHigh = vals.join() === '0,9,10,11,12'; // 10 J Q K A
+  const straight = vals.length === 5 && (vals[4] - vals[0] === 4 || wheelHigh);
+  if (straight && flush) return wheelHigh ? 'royal' : 'straight_flush';
+  if (groups[0] === 4) return 'four';
+  if (groups[0] === 3 && groups[1] === 2) return 'full';
+  if (flush) return 'flush';
+  if (straight) return 'straight';
+  if (groups[0] === 3) return 'three';
+  if (groups[0] === 2 && groups[1] === 2) return 'two_pair';
+  if (groups[0] === 2) {
+    const pair = Number(Object.keys(counts).find((k) => counts[k] === 2));
+    if (pair === 0 || pair >= 10) return 'jacks'; // aces, jacks, queens, kings
+  }
+  return 'none';
+}
+const videopoker = {
+  name: 'Video Poker', rtp: 99.5, round: true, PAYS: VP_PAYS, NAMES: VP_NAMES, hand: vpHand,
+  check: () => ({}),
+  start(rng) {
+    const pool = Array.from({ length: 52 }, (_, i) => i);
+    const cards = [];
+    for (let i = 0; i < 10; i++) cards.push(rng.pick(pool));
+    return { cards };
+  },
+  act(rng, s, action, p) {
+    if (action !== 'draw') fail('Unknown move.');
+    const hold = new Set((Array.isArray(p.hold) ? p.hold : []).map(Number).filter((i) => Number.isInteger(i) && i >= 0 && i < 5));
+    let next = 5;
+    const final = s.cards.slice(0, 5).map((n, i) => (hold.has(i) ? n : s.cards[next++]));
+    const hand = vpHand(final.map(deckCard));
+    return { state: { ...s, hold: [...hold].sort(), final, hand }, done: true, mult: VP_PAYS[hand] };
+  },
+  view(s, done) {
+    const dealt = s.cards.slice(0, 5).map(deckCard);
+    const out = { dealt, dealtHand: vpHand(dealt) };
+    if (done && s.final) Object.assign(out, { hold: s.hold, hand: s.final.map(deckCard), result: s.hand });
+    return out;
+  },
+  verify(rng) {
+    const s = videopoker.start(rng);
+    const txt = (ns) => ns.map((n) => { const c = deckCard(n); return c.r + c.s; }).join('  ');
+    return [['Dealt', txt(s.cards.slice(0, 5))], ['Replacements, in order', txt(s.cards.slice(5))],
+      ['How to read it', 'Each card you discard is replaced by the next card in the replacement list, left to right.']];
+  },
+};
+
+/** Chicken: cross lanes of traffic. Each lane has the same chance of getting hit; the lane where
+ *  that happens is decided when the round starts. Multiplier after k lanes = 0.98 / P(surviving k). */
+const CHICKEN_LEVELS = { easy: { p: 0.04, lanes: 24 }, medium: { p: 0.12, lanes: 20 }, hard: { p: 0.2, lanes: 16 }, daredevil: { p: 0.4, lanes: 10 } };
+const chickenMult = (d, k) => floor2(0.98 / (1 - CHICKEN_LEVELS[d].p) ** k);
+const chicken = {
+  name: 'Chicken', rtp: 98, round: true, LEVELS: CHICKEN_LEVELS, mult: chickenMult,
+  check(p) { return { difficulty: pickOne(p.difficulty || 'medium', Object.keys(CHICKEN_LEVELS), 'difficulty') }; },
+  start(rng, { difficulty }) {
+    const c = CHICKEN_LEVELS[difficulty];
+    let death = c.lanes;
+    for (let k = 0; k < c.lanes; k++) if (rng.float() < c.p) { death = k; break; }
+    return { d: difficulty, death, lane: 0 };
+  },
+  act(rng, s, action) {
+    if (action === 'cashout') {
+      if (!s.lane) fail('Cross at least one lane first.');
+      return { state: s, done: true, mult: chickenMult(s.d, s.lane) };
+    }
+    if (action !== 'step') fail('Unknown move.');
+    if (s.lane === s.death) return { state: { ...s, dead: true }, done: true, mult: 0 };
+    const next = { ...s, lane: s.lane + 1 };
+    if (next.lane === CHICKEN_LEVELS[s.d].lanes) return { state: next, done: true, mult: chickenMult(s.d, next.lane) };
+    return { state: next };
+  },
+  view(s, done) {
+    const c = CHICKEN_LEVELS[s.d];
+    return { difficulty: s.d, lane: s.lane, lanes: c.lanes, dead: !!s.dead, multiplier: s.lane ? chickenMult(s.d, s.lane) : 1,
+      next: s.lane < c.lanes ? chickenMult(s.d, s.lane + 1) : null, ...(done ? { death: s.death } : {}) };
+  },
+  verify(rng, fresh) {
+    const label = { easy: 'Easy', medium: 'Medium', hard: 'Hard', daredevil: 'Daredevil' };
+    return Object.keys(CHICKEN_LEVELS).map((k) => {
+      const s = chicken.start(fresh(), { difficulty: k });
+      return [`${label[k]} (${Math.round(CHICKEN_LEVELS[k].p * 100)}% per lane)`, s.death >= CHICKEN_LEVELS[k].lanes ? `Crosses all ${s.death} lanes safely` : `Hit in lane ${s.death + 1}`];
+    });
+  },
+};
+
+/** Cases: open a case for one prize. Chances are out of 10,000; every risk level returns 98%. */
+const CASES = {
+  low: [[0.4, 3887], [0.9, 2621], [1.2, 1780], [1.5, 937], [2, 562], [4, 169], [10, 37], [25, 7]],
+  medium: [[0.2, 5605], [0.5, 1488], [1.1, 1339], [2, 788], [3, 438], [6, 262], [20, 70], [60, 10]],
+  high: [[0, 5551], [0.3, 2485], [1.2, 1098], [3, 549], [8, 230], [25, 70], [100, 15], [500, 2]],
+};
+function casePrize(rng, risk) {
+  let roll = Math.floor(rng.float() * 10000);
+  const t = CASES[risk];
+  for (let i = 0; i < t.length; i++) { if (roll < t[i][1]) return i; roll -= t[i][1]; }
+  return t.length - 1;
+}
+const cases = {
+  name: 'Cases', rtp: 98, TABLE: CASES,
+  check(p) { return { risk: pickOne(p.risk || 'medium', Object.keys(CASES), 'risk level') }; },
+  play(rng, { risk }) {
+    const tier = casePrize(rng, risk);
+    return { mult: CASES[risk][tier][0], result: { tier, mult: CASES[risk][tier][0] } };
+  },
+  verify(rng) {
+    const f = rng.float();
+    const roll = Math.floor(f * 10000);
+    return [['Roll (0-9,999)', String(roll)], ['Prize', Object.keys(CASES).map((k) => `${k}: ${CASES[k][casePrize({ float: () => f }, k)][0]}×`).join('  ·  ')]];
+  },
+};
+
+/** Dragon Tiger: one card each, the higher card wins (ace low, king high). A tie hands back half of a
+ *  Dragon or Tiger bet; the Tie bet pays 11 to 1. */
+const DT_PAYS = { dragon: 2, tiger: 2, tie: 12 };
+const dragontiger = {
+  name: 'Dragon Tiger', rtp: 96.2,
+  check(p) { return { side: pickOne(p.side, ['dragon', 'tiger', 'tie'], 'side') }; },
+  play(rng, { side }) {
+    const dragon = card(rng);
+    const tiger = card(rng);
+    const winner = dragon.i > tiger.i ? 'dragon' : tiger.i > dragon.i ? 'tiger' : 'tie';
+    const mult = winner === side ? DT_PAYS[side] : winner === 'tie' ? 0.5 : 0;
+    return { mult, result: { dragon, tiger, winner } };
+  },
+  verify(rng) {
+    const { result: r } = dragontiger.play(rng, { side: 'dragon' });
+    return [['Dragon', r.dragon.r + r.dragon.s], ['Tiger', r.tiger.r + r.tiger.s], ['Result', r.winner === 'tie' ? 'Tie' : `${r.winner === 'dragon' ? 'Dragon' : 'Tiger'} wins`]];
+  },
+};
+
+const GAMES = {
+  blackjack, baccarat, roulette, hilo, keno, dice, limbo, plinko, wheel, diamonds, double, coinflip, crash, mines, towers, pump,
+  videopoker, chicken, cases, dragontiger,
+};
 
 module.exports = { GAMES, GameError, card, floor2 };

@@ -8,7 +8,10 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n) => Number(n || 0).toLocaleString('en-US');
-  const money = (cents) => `$${(Number(cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const money = (cents) => {
+    const v = Number(cents || 0) / 100;
+    return `${v < 0 ? '−' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
   const moneyShort = (cents) => (cents % 100 === 0 ? `$${fmt(cents / 100)}` : money(cents));
   const toCents = (dollars) => Math.round(parseFloat(String(dollars).replace(/[$,]/g, '')) * 100) || 0;
   const dollars = (cents) => (Number(cents || 0) / 100).toFixed(2);
@@ -321,6 +324,8 @@
     $('.side-backdrop') && $('.side-backdrop').remove();
     $('.sidebar') && $('.sidebar').classList.remove('open');
     window.scrollTo(0, 0);
+    // leaving a game page: stop its animations and timers (the game files live in /js/games/)
+    if (window.GR && window.GR.games && window.GR.games.leave && !(parts[0] === 'games')) window.GR.games.leave();
     handler();
   }
 
@@ -1017,7 +1022,7 @@
 
   /* ================================================================= games */
 
-  /** Games live in /js/games.js (loaded after this file); it fills in window.GR.games. */
+  /** Games live in /js/games/ (loaded after this file); they fill in window.GR.games. */
   function pageGames() {
     const g = window.GR && window.GR.games;
     if (!g) { page(emptyHTML('Games failed to load. Refresh the page.', 'fa-triangle-exclamation')); return; }
@@ -1797,7 +1802,6 @@
           ${toggle('games_enabled', 'Games on', 'Turn off to stop all new bets (open rounds can still finish).')}
           ${row('games_min_bet', 'Minimum bet (USD)', 'Smallest bet allowed in any game.', 'number', dollars(s.games_min_bet || 10), 'min="0.01" step="0.01"')}
           ${row('games_max_bet', 'Maximum bet (USD)', 'Largest bet allowed in any game.', 'number', dollars(s.games_max_bet || 10000), 'min="0.01" step="0.01"')}
-          ${row('games_max_win', 'Maximum win per bet (USD)', 'Payouts above this are capped. Protects you from huge multipliers (mines, limbo, crash).', 'number', dollars(s.games_max_win || 100000), 'min="0.01" step="0.01"')}
         </div>
         <p class="faint mt-16" style="font-size:13px">Postback URLs, signatures and hold periods are set per network under <a href="#/admin/walls" class="gold">Offerwalls</a>.</p>
         <button class="btn btn-gold btn-lg mt-24">Save settings</button>
@@ -1809,7 +1813,6 @@
       body.games_enabled = body.games_enabled ? 1 : 0;
       body.games_min_bet = toCents(body.games_min_bet);
       body.games_max_bet = toCents(body.games_max_bet);
-      body.games_max_win = toCents(body.games_max_win);
       body.signup_bonus = toCents(body.signup_bonus);
       body.daily_reward = toCents(body.daily_reward);
       try {
@@ -1826,7 +1829,7 @@
   window.GR = {
     $, $$, esc, fmt, money, moneyShort, toCents, api, toast, coin, avatar, dateTime, emptyHTML, skels,
     page, setContent, openModal, closeModal, confirmModal, openAuth, reveal, afterRender, countTo,
-    setUser, showBalance, creditFx, coinRain, go, state, reduced,
+    setUser, showBalance, creditFx, flyCoins, coinRain, go, state, reduced,
   };
 
   /* ================================================================== boot */
@@ -1838,6 +1841,8 @@
   }
 
   async function refreshMe() {
+    // while a game result is still animating, the top bar deliberately shows the balance from before it
+    if (window.GR.games && window.GR.games.busy && window.GR.games.busy()) return;
     try { setUser((await api('/me')).user); } catch { /* ignore */ }
   }
 

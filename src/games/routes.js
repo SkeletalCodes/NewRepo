@@ -19,7 +19,7 @@ const express = require('express');
 const { db, debit, credit, getSettings } = require('../db');
 const { requireUser, rateLimit, publicUser } = require('../auth');
 const { randomHex, sha256hex, rngFor } = require('./fair');
-const { GAMES, GameError, card } = require('./logic');
+const { GAMES, GameError } = require('./logic');
 
 const router = express.Router();
 const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
@@ -32,7 +32,6 @@ async function limits() {
     enabled: s.games_enabled !== '0',
     min: Math.max(1, Number(s.games_min_bet) || 10),
     max: Math.max(1, Number(s.games_max_bet) || 10000),
-    maxWin: Math.max(1, Number(s.games_max_win) || 100000),
   };
 }
 
@@ -70,10 +69,10 @@ function betView(b, currentHash) {
   return out;
 }
 
-/** Pay out a finished bet (inside a transaction). The payout is capped at the max-win setting. */
-async function settle(t, bet, mult, maxWin, payoutCents) {
+/** Pay out a finished bet (inside a transaction). There is no cap: a 37× on $100 pays $3,700. */
+async function settle(t, bet, mult, payoutCents) {
   let payout = payoutCents !== undefined ? payoutCents : Math.floor(bet.amount * mult + 1e-9);
-  payout = Math.max(0, Math.min(payout, maxWin));
+  payout = Math.max(0, payout);
   const realMult = bet.amount ? Math.round((payout / bet.amount) * 10000) / 10000 : 0;
   if (payout > 0) await credit(t, bet.user_id, payout, 'win', `${GAMES[bet.game].name} win (${realMult}×)`);
   return { payout, mult: realMult };
@@ -87,6 +86,7 @@ router.get('/config', async (_req, res) => {
     tables: {
       plinko: GAMES.plinko.PAYS, keno: GAMES.keno.PAY, diamonds: GAMES.diamonds.PAY,
       towers: GAMES.towers.LEVELS, pump: GAMES.pump.LEVELS, roulette_reds: GAMES.roulette.REDS,
+      videopoker: GAMES.videopoker.PAYS, chicken: GAMES.chicken.LEVELS, cases: GAMES.cases.TABLE,
       wheel: Object.fromEntries(['low', 'medium', 'high'].map((r) => [r, Object.fromEntries([10, 20, 30, 40, 50].map((n) => [n, GAMES.wheel.slices(r, n)]))])),
     },
   });
@@ -107,15 +107,13 @@ router.post('/verify', (req, res) => {
   const client = String(b.client_seed || '').trim();
   const nonce = Math.floor(Number(b.nonce));
   if (!server || !client || !(nonce >= 0)) return bad(res, 'Enter the server seed, client seed and nonce.');
-  let params;
-  try { params = g.check(b.params || {}); } catch (err) { return bad(res, err.message); }
-  const rng = rngFor(server, client, nonce);
-  const out = { server_hash: sha256hex(server) };
-  if (!g.round) Object.assign(out, g.play(rng, params));
-  else if (b.game === 'crash') out.crash_point = g.start(rng, params).at;
-  else if (b.game === 'mines') out.mine_order = g.start(rngFor(server, client, nonce), { mines: 24 }).layout;
-  else if (b.game === 'blackjack' || b.game === 'hilo') { out.cards = []; for (let i = 0; i < 12; i++) out.cards.push(card(rng)); }
-  else out.state = g.start(rng, params);
+  const fresh = () => rngFor(server, client, nonce);
+  const rows = [['Server seed hash', sha256hex(server)], ...g.verify(fresh(), fresh)];
+  const out = { server_hash: sha256hex(server), rows };
+  // with the bet's own settings, also say what it paid (instant games)
+  if (!g.round && b.params) {
+    try { const r = g.play(fresh(), g.check(b.params)); out.multiplier = r.mult; out.result = r.result; } catch { /* rows are enough */ }
+  }
   res.json(out);
 });
 
@@ -202,7 +200,7 @@ router.post('/:game/bet', betLimiter, async (req, res) => {
         VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?) RETURNING *`, req.user.id, req.params.game, amount, JSON.stringify(params),
       JSON.stringify(state), seed.server_seed, sha256hex(seed.server_seed), seed.client_seed, seed.nonce, now);
       if (!finished) return row;
-      const paid = await settle(t, row, finished.mult, l.maxWin, finished.payoutCents);
+      const paid = await settle(t, row, finished.mult, finished.payoutCents);
       return t.get("UPDATE bets SET status = 'settled', payout = ?, multiplier = ?, settled_at = ? WHERE id = ? RETURNING *", paid.payout, paid.mult, now, row.id);
     });
   } catch (err) {
@@ -216,15 +214,14 @@ router.post('/:game/bet', betLimiter, async (req, res) => {
 router.post('/bets/:id/action', betLimiter, async (req, res) => {
   const id = Math.floor(Number(req.params.id));
   const action = String(req.body.action || '');
-  const l = await limits();
-  const result = await runAction(req.user.id, id, action, req.body.params || {}, l);
+  const result = await runAction(req.user.id, id, action, req.body.params || {});
   if (result.error) return bad(res, result.error, result.code || 400);
   const user = await db.get('SELECT * FROM users WHERE id = ?', req.user.id);
   res.json({ bet: betView(result.bet, result.bet.server_hash), user: publicUser(user) });
 });
 
 /** Apply one move to a round. Uses the row's version number so two clicks can't both count. */
-async function runAction(userId, id, action, params, l) {
+async function runAction(userId, id, action, params) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const b = await db.get('SELECT * FROM bets WHERE id = ? AND user_id = ?', id, userId);
     if (!b) return { error: 'Round not found.', code: 404 };
@@ -252,7 +249,7 @@ async function runAction(userId, id, action, params, l) {
           JSON.stringify(res.state), amount, b.id, b.version, 'active');
         if (upd.changes !== 1) throw new Retry();
         if (!res.done) return { bet: await t.get('SELECT * FROM bets WHERE id = ?', b.id) };
-        const paid = await settle(t, { ...b, amount }, res.mult, l.maxWin);
+        const paid = await settle(t, { ...b, amount }, res.mult);
         return { bet: await t.get("UPDATE bets SET status = 'settled', payout = ?, multiplier = ?, settled_at = ? WHERE id = ? RETURNING *", paid.payout, paid.mult, Date.now(), b.id) };
       });
       return out;
@@ -271,10 +268,9 @@ async function settleExpiredCrash(userId = null) {
   const rows = await db.all(`SELECT id, user_id, state FROM bets WHERE status = 'active' AND game = 'crash' ${userId ? 'AND user_id = ?' : ''} LIMIT 200`,
     ...(userId ? [userId] : []));
   if (!rows.length) return;
-  const l = await limits();
   for (const r of rows) {
     const s = parse(r.state);
-    if (g2().resolve(s, Date.now() - s.started, false)) await runAction(r.user_id, r.id, 'poll', {}, l);
+    if (g2().resolve(s, Date.now() - s.started, false)) await runAction(r.user_id, r.id, 'poll', {});
   }
 }
 const g2 = () => GAMES.crash;

@@ -1,6 +1,6 @@
 # GoldRush: a get-paid-to (GPT) rewards site
 
-A complete GPT / offerwall rewards site (similar to Gemsloot, Freecash, etc.): users earn **US dollars** by completing offers and cash out in **crypto** (BTC, ETH, LTC, SOL, BNB, TRX, DOGE, from $5), **prepaid cards** (Visa, Mastercard, from $20) or **gift cards** (Amazon, Walmart, Target, Apple, Google Play, Steam, from $5). Minimums can be changed per method in the admin panel. It ships with a full admin panel, a production-ready offerwall postback backend, and 16 provably fair games played with the real USD balance (18+).
+A complete GPT / offerwall rewards site (similar to Gemsloot, Freecash, etc.): users earn **US dollars** by completing offers and cash out in **crypto** (BTC, ETH, LTC, SOL, BNB, TRX, DOGE, from $5), **prepaid cards** (Visa, Mastercard, from $20) or **gift cards** (Amazon, Walmart, Target, Apple, Google Play, Steam, from $5). Minimums can be changed per method in the admin panel. It ships with a full admin panel, a production-ready offerwall postback backend, and 20 provably fair games played with the real USD balance (18+).
 
 Built with **Node.js + Express**. It uses **Postgres** when `DATABASE_URL` is set (production, Vercel) and falls back to **SQLite** (Node's built-in `node:sqlite`) for zero-config local development. The front end is a single-page app in vanilla JS and CSS, with no build step.
 
@@ -53,7 +53,7 @@ All money is stored as integer **US cents**. A database from the earlier Gems ve
 - Profile page with activity, earnings (including rewards on hold) and cashout history
 - Account settings: change password or email, see every device you're logged in on, sign any of them out
 - Forgot password: emailed reset link (1 hour, single use), or a link an admin creates for you
-- Games section in the sidebar: 16 provably fair games played with the real USD balance (see [Games](#games))
+- Games section in the sidebar: 20 provably fair games played with the real USD balance (see [Games](#games))
 - Responsive layout: on mobile the sidebar becomes a drawer
 
 **Admin panel** (`/#/admin`)
@@ -67,7 +67,7 @@ All money is stored as integer **US cents**. A database from the earlier Gems ve
 - Users panel also shows signup and last IP, other accounts on the same IP, lockouts, and active sessions; admins can create a password reset link or sign a user out everywhere
 - Audit log: every admin change, who made it and from where (secrets are never recorded)
 - Games: house profit today / 7 days / all time, open rounds, per-game wagered, paid and actual RTP, and the latest bets
-- Settings: site name, sign-up bonus, daily bonus, referral %, max accounts per IP, announcement bar, maintenance mode, and games on/off, min bet, max bet and max win per bet
+- Settings: site name, sign-up bonus, daily bonus, referral %, max accounts per IP, announcement bar, maintenance mode, and games on/off, min bet and max bet (there is no cap on wins)
 
 There are no fake offers, walls or users. A database from an earlier version is cleaned up automatically on first start: demo users, demo offers and demo offerwalls are deleted, and any balance users got from the simulated offers is taken back, with an "adjustment" entry in their history.
 
@@ -83,13 +83,15 @@ There are no fake offers, walls or users. A database from an earlier version is 
 
 ## Games
 
-The sidebar's **Games** section has 16 games, built in the site's own black-and-gold design: **Blackjack, Baccarat, Roulette, Hi-Lo, Keno, Dice, Limbo, Plinko, Wheel, Diamonds, Double, Coin Flip, Crash, Mines, Towers and Pump**. There are no slots. Bets come out of the user's real USD balance, and wins go back into it.
+The sidebar's **Games** section has 20 games. Sixteen are ported from the original game site with the same layouts, animations, sounds and pay tables, restyled in GoldRush's black and gold: **Blackjack, Baccarat, Roulette, Hi-Lo, Keno, Dice, Limbo, Plinko, Wheel, Diamonds, Double, Coin Flip, Crash, Mines, Towers and Pump**. Four are new: **Video Poker** (Jacks or Better, 9/6), **Chicken** (cross the road, cash out before a car hits), **Cases** (case opening, 98% at every risk level) and **Dragon Tiger**. There are no slots. Bets come out of the user's real USD balance, and wins go back into it.
+
+Every game page has the original's frame: a bet panel with ½ / 2× / Max, **Manual and Auto** betting (number of bets, raise on win/loss, stop at profit/loss) for the one-press games, keyboard shortcuts (Space to bet, A/S to halve/double), favourites, how-to-play rules, a live profit chart, theatre mode, sound effects and the Fairness window. The layout adapts to the space available, from phones (controls under the game) to wide screens.
 
 - **18+ only.** Sign-up requires confirming you're 18 or older, and the terms say so. Gambling with real money is regulated in most places: get the license your market requires, and add age/identity checks before going live.
 - **Everything is decided on the server.** The browser only sends the bet and the player's choices. Hidden information (the mines layout, tower traps, the dealer's hole card, the crash point, the pump's pop point) never reaches the browser until the round is over.
 - **Provably fair.** Each user has a server seed (shown only as its SHA-256 hash), a client seed they can change, and a nonce that goes up with every bet. Results come from `HMAC-SHA256(serverSeed, "clientSeed:nonce:block")`, 4 bytes per random number. Rotating the seed pair reveals the old server seed so any past bet can be recomputed, and the in-game **Fairness** window does that check.
 - **Multi-step games** (Blackjack, Hi-Lo, Mines, Towers, Pump, Crash) keep their state in the database, so a reload resumes the round. Every action is version-checked, so a double-click can't cash out twice. Crash runs on the server clock, and rounds nobody cashes out are settled automatically.
-- **Limits** are set in **Admin → Settings → Games**: on/off switch, minimum bet, maximum bet, and a **maximum win per bet** that caps any payout (protects you from huge multipliers). Turning games off stops new bets, and open rounds can still finish.
+- **Limits** are set in **Admin → Settings → Games**: on/off switch, minimum bet and maximum bet. **There is no maximum win**: a 37× on a $100 bet pays $3,700. Keep your max bet at a level your bankroll can cover. Turning games off stops new bets, and open rounds can still finish.
 - Every bet and win is written to the ledger as `bet` / `win` transactions. Winnings don't count toward "total earned" on leaderboards.
 
 | Endpoint | |
@@ -179,6 +181,6 @@ src/offerwalls.js  Offerwall presets, signature checks, postback processing, hol
 src/seed.js        Payout methods, welcome promo, one-time upgrades
 src/mail.js        Email via Resend or SMTP, and the email template
 src/games/         Provably fair RNG (fair.js), game rules and pay tables (logic.js), games API (routes.js)
-public/            SPA (index.html, css/style.css, js/app.js, js/games.js)
+public/            SPA (index.html, css/style.css + css/games.css, js/app.js, js/games/ — one file per game plus core.js and rules.js)
 test/smoke.js      End-to-end API test
 ```

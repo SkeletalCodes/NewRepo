@@ -361,7 +361,6 @@ const DEFAULT_SETTINGS = {
   games_enabled: '1',
   games_min_bet: '10', // cents
   games_max_bet: '10000',
-  games_max_win: '100000', // largest payout from a single bet
 };
 
 /** Create tables and default settings. Safe to run concurrently (serverless cold starts). */
