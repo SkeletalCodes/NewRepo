@@ -280,9 +280,10 @@
   /**
    * Follows a timed round. Polls the server, keeps this device's clock in step with the server's, and
    * calls onView with every answer. The server decides every bet; this only tells the page what happened.
+   * every: ms between polls, or a function of the last answer (Crash polls faster while the rocket flies).
    */
   function follow(game, onView, every = 900) {
-    let stopped = false, timer = 0, offset = 0, lastSeq = null;
+    let stopped = false, timer = 0, offset = 0, lastSeq = null, last = null;
     const apply = (v) => {
       if (!v || !v.round) return;
       if (lastSeq !== null && v.round.seq !== lastSeq) syncMe(); // a round ended: the balance may have moved
@@ -295,9 +296,10 @@
       try {
         const v = await GR.api(`/games/rounds/${game}`);
         offset = v.now - (t0 + Date.now()) / 2;
+        last = v;
         apply(v);
       } catch { /* try again in a moment */ }
-      if (!stopped) timer = setTimeout(tick, every);
+      if (!stopped) timer = setTimeout(tick, typeof every === 'function' ? every(last) : every);
     };
     tick();
     return {
