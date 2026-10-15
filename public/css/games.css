@@ -1,7 +1,7 @@
 /* GoldRush games. The game layouts, animations and per-game styles are the ones from the original game
    site, restyled for GoldRush (black + gold, Fredoka numbers, the $ coin). Class names that clashed with
    style.css carry a "g" prefix (gbtn, gfield, gseg, gamount, gcoin...), and every keyframe is "g-" prefixed.
-   Everything lives under .bbg (the game page) or .bbg-modal (rules / fairness windows). */
+   Everything lives under .bbg (the game page) or .bbg-modal (the rules window). */
 
 .bbg, .bbg-modal {
   --panel: var(--card);
@@ -138,32 +138,15 @@
 .confetti i { position: absolute; left: 0; top: 0; border-radius: 2px; opacity: 0; animation: g-confetti 1.700s cubic-bezier(.15, .7, .3, 1) forwards; }
 @keyframes g-confetti { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 220px)) rotate(var(--r)); } }
 
-/* ---------- field validation + fairness modal ---------- */
 /* ---------- field validation ---------- */
 .gfield.bad .gamount { border-color: var(--lose); box-shadow: 0 0 0 3px rgba(255, 92, 122, .14); }
 .gfield-hint { font-size: 12px; font-weight: 600; color: var(--lose); margin-top: -2px; }
 .gfield-hint:empty { display: none; }
 .gfield input.bad { border-color: var(--lose); box-shadow: 0 0 0 3px rgba(255, 92, 122, .14); }
 
-/* ---------- fairness modal ---------- */
-.gmodal.single { grid-template-columns: 1fr; width: min(590px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; }
+/* ---------- rules modal title ---------- */
 .modal-title { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: 20px; font-weight: 800; }
 .modal-title svg { color: var(--win); }
-.copy { display: flex; gap: 6px; }
-.copy input[type=text] { flex: 1; min-width: 0; font: 600 12.500px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.copy button { flex: none; padding: 0 14px; border-radius: 11px; font-weight: 700; font-size: 13px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); }
-.copy button:hover { color: var(--text); background: var(--panel-3); }
-.copy button.go { border: 0; color: var(--accent-ink); background: linear-gradient(180deg, #f3dc6b, #d4b42e); }
-.fair-sep { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-.fair-sep::before, .fair-sep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.fair-prev { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); }
-.fair-out { border-radius: 12px; overflow: hidden; background: var(--bg); border: 1px solid var(--line); }
-.fo-row { display: grid; gap: 3px; padding: 10px 13px; border-bottom: 1px solid var(--line); }
-.fo-row:last-child { border-bottom: 0; }
-.fo-row span { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
-.fo-row b { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
-.fair-note { margin-top: 16px; font-size: 12px; line-height: 1.6; color: var(--dim); }
-.fair-note code { font-size: 11px; }
 .hint.left { text-align: left; }
 
 
@@ -178,7 +161,6 @@
 .gf-btn:hover { background: var(--panel-2); color: var(--text); }
 .gf-btn.on { color: var(--accent); }
 .gf-btn#gf-fav.on svg { fill: var(--accent); }
-.game-foot .fair-chip { display: inline-flex; }
 .game-head .rtp { padding: 5px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
 .livecard { position: fixed; left: calc(var(--side) + 16px); bottom: 16px; z-index: 50; width: 260px; padding: 12px 16px 14px; border-radius: 16px; background: rgba(22, 25, 34, .96); border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0, 0, 0, .6); backdrop-filter: blur(10px); animation: toastIn .25s cubic-bezier(.2, 1.2, .4, 1); }
 body.theatre .livecard { left: 16px; }
@@ -867,8 +849,6 @@ body.theatre .livecard { left: 16px; }
 .bbg .gf-btn { border-radius: 50%; }
 .bbg .gf-btn.on { color: var(--gold); }
 .gf-btn.muted { color: var(--faint); }
-.fair-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 30px; font-weight: 700; font-size: 12.5px; color: var(--green); background: rgba(20, 241, 149, .08); border: 2px solid rgba(20, 241, 149, .28) !important; }
-.fair-chip:hover { background: rgba(20, 241, 149, .16); }
 
 /* fields */
 .gfield-l { font-size: 11.5px; color: var(--faint); }
@@ -894,10 +874,7 @@ body.theatre .livecard { left: 16px; }
 .bbg .card-sec h3 { font-size: 18px; font-weight: 400; color: #fff; }
 .bbg .tr.th { color: var(--faint); }
 .bbg .tr.mine { box-shadow: inset 3px 0 0 var(--gold); }
-.bbg .tr .verify { margin-left: 6px; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; color: var(--muted); border: 1px solid var(--line-2) !important; }
-.bbg .tr .verify:hover { color: var(--gold); border-color: var(--gold) !important; }
 .tr .gi svg { width: 100%; height: 100%; display: block; }
-.bbg .nonce { color: var(--faint); font-size: 11px; font-weight: 700; }
 .g-legal { color: var(--faint); font-size: 12px; font-weight: 600; margin-top: 18px; }
 .g-legal i { color: var(--gold); }
 
@@ -913,7 +890,7 @@ body.g-theatre .main { margin-left: 0; }
 .live-grid .pos { color: var(--green); }
 .live-grid .minus { color: var(--red); }
 
-/* modals (rules + fairness) live inside GoldRush's modal */
+/* the rules modal lives inside GoldRush's modal */
 .bbg-modal { padding: 26px 26px 22px; }
 .bbg-modal .modal-title { display: flex; align-items: center; gap: 12px; margin: 0 40px 18px 0; font-size: 22px; color: #fff; }
 .bbg-modal .modal-title svg { color: var(--green); }
@@ -925,13 +902,9 @@ body.g-theatre .main { margin-left: 0; }
 .bbg-modal .gfield select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 18px) 20px, calc(100% - 13px) 20px; background-size: 5px 5px; background-repeat: no-repeat; }
 .bbg-modal .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .bbg-modal .readout { display: flex; align-items: center; height: 46px; padding: 0 13px; }
-.bbg-modal .copy button { border: 2px solid var(--line) !important; background: var(--card-2); }
-.bbg-modal .copy button.go { background: var(--gold); color: var(--bg); border-color: var(--gold) !important; }
 .bbg-modal .gempty { padding: 18px; text-align: center; color: var(--faint); font-size: 14px; }
 .bbg-modal .gbtn { font-size: 13px; }
-.bbg-modal .fair-out { background: var(--bg); border: 2px solid var(--line); }
-.bbg-modal .fair-out .fo-ok { color: var(--green); }
-.bbg-modal .fair-note code, .bbg-modal .rules-list code { font-size: 11px; color: var(--gold); background: rgba(234, 200, 55, .1); padding: 1px 6px; border-radius: 6px; }
+.bbg-modal .rules-list code { font-size: 11px; color: var(--gold); background: rgba(234, 200, 55, .1); padding: 1px 6px; border-radius: 6px; }
 @media (max-width: 600px) {
   .bbg-modal { padding: 22px 16px 18px; }
   .bbg-modal .rules-facts { grid-template-columns: 1fr; }
@@ -967,7 +940,6 @@ body.g-theatre .main { margin-left: 0; }
   .bj-table { min-height: 420px; }
   .tr { grid-template-columns: 1.2fr 1fr .8fr 1fr; padding: 9px 8px; font-size: 13px; gap: 6px; }
   .table.four .tr { grid-template-columns: 1.2fr .9fr .8fr 1fr; }
-  .tr .nonce, .tr .verify { display: none; }
   .card-sec { padding: 14px 10px; }
 }
 

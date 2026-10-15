@@ -1,0 +1,563 @@
+/* =====================================================================
+   GoldRush arcade skin. Loaded after games.css, so where the rewritten
+   game UI needs a different look (core.js lobby and feeds, double.js,
+   crash.js, baccarat.js, roulette.js, keno.js and the app.js pager),
+   these rules win.
+
+   1  Lobby (outside .bbg, so viewport media queries)
+   2  Bet feeds (lobby, game page and round tables)
+   3  Pager (app.js pagerBar, under lists)
+   4  Game frame heading and section titles (.bbg)
+   5  Chips: stacks on the table and the chip picker
+   6  Double
+   7  Crash
+   8  Baccarat
+   9  Roulette
+   10 Keno
+   11 Small game frames (container queries on .bbg)
+   12 Motion (infinite and large motion only with no reduced-motion)
+   ===================================================================== */
+
+/* ---------- 1. Lobby ---------- */
+.gl { position: relative; }
+.gl [hidden] { display: none !important; }
+
+.gl-hero {
+  position: relative; overflow: hidden; display: grid; gap: 28px; align-items: center;
+  grid-template-columns: minmax(0, 1.25fr) minmax(250px, .75fr);
+  padding: 34px 36px; border-radius: 26px; border: 2px solid var(--line-2);
+  background:
+    radial-gradient(900px 340px at 0% 0%, rgba(234, 200, 55, .22), transparent 60%),
+    radial-gradient(700px 320px at 100% 100%, rgba(20, 241, 149, .12), transparent 60%),
+    linear-gradient(135deg, #1b1a12 0%, var(--card) 55%, #0c1a18 100%);
+  box-shadow: 0 30px 60px -36px rgba(0, 0, 0, .9);
+}
+.gl-hero-copy { min-width: 0; }
+.gl-kicker {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
+  background: rgba(234, 200, 55, .12); color: var(--gold);
+  font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+}
+.gl-kicker svg { width: 14px; height: 14px; }
+.gl-hero h1 { margin: 16px 0 0; font-size: clamp(32px, 4.6vw, 54px); line-height: 1.02; color: #fff; text-align: left; }
+.gl-hero p { margin: 14px 0 0; max-width: 46ch; font-size: 16px; text-align: left; color: var(--muted); }
+
+.gl-hero-live { display: grid; gap: 12px; min-width: 0; }
+.gl-live-card {
+  position: relative; display: grid; gap: 6px; padding: 16px 18px; overflow: hidden;
+  border-radius: 18px; color: #fff;
+  background: radial-gradient(120% 90% at 100% 0%, rgba(255, 255, 255, .22), transparent 55%), linear-gradient(135deg, var(--c1), var(--c2));
+  box-shadow: 0 18px 30px -18px rgba(0, 0, 0, .9), inset 0 0 0 1px rgba(255, 255, 255, .1);
+  transition: transform .18s, box-shadow .18s;
+}
+.gl-live-card:hover { transform: translateY(-3px); box-shadow: 0 24px 36px -18px rgba(0, 0, 0, .95), 0 0 0 2px var(--gold); }
+.gl-live-tag {
+  justify-self: start; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px;
+  background: var(--red); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+}
+.gl-live-tag svg { width: 12px; height: 12px; }
+.gl-live-name { font-family: var(--head); font-size: 26px; line-height: 1; text-transform: uppercase; }
+.gl-live-phase { font-size: 14px; font-weight: 700; }
+.gl-live-meta { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, .75); }
+
+.gl-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+.gl-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.gl-chips .chip { padding: 8px 15px; font-size: 13px; }
+.gl-chips .chip svg { width: 14px; height: 14px; }
+.gl-chips .chip:hover { color: var(--text); border-color: var(--gold); }
+.gl-chips .chip.on { background: var(--gold); border-color: var(--gold); color: var(--bg); font-weight: 800; }
+.gl-search {
+  margin-left: auto; display: flex; align-items: center; gap: 8px; height: 42px; min-width: 230px; padding: 0 16px;
+  border-radius: 99px; background: var(--bg); border: 2px solid var(--line-2); color: var(--faint);
+  transition: border-color .15s;
+}
+.gl-search:focus-within { border-color: var(--gold); }
+.gl-search svg { width: 16px; height: 16px; flex: none; }
+.gl-search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); }
+
+.gl-off {
+  margin-top: 22px; padding: 12px 16px; border-radius: 14px; font-weight: 700; color: var(--gold);
+  background: rgba(234, 200, 55, .08); border: 2px solid rgba(234, 200, 55, .3);
+}
+
+/* rows of cards */
+.gl-row { margin-top: 34px; }
+.gl-row-head { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 14px; }
+.gl-row-head h2 { display: flex; align-items: center; gap: 10px; margin-right: auto; font-size: 24px; color: #fff; letter-spacing: .01em; }
+.gl-row-head h2 svg { width: 18px; height: 18px; flex: none; color: var(--gold); }
+.gl-sec .gl-row-head h2 svg { color: var(--red); }
+.gl-note { font-size: 13px; font-weight: 600; color: var(--faint); }
+.gl-row-tools { display: flex; align-items: center; gap: 8px; flex: none; }
+.gl-more {
+  padding: 6px 12px; border-radius: 99px; border: 2px solid var(--line-2); background: none;
+  font-size: 13px; font-weight: 700; color: var(--muted); transition: color .15s, border-color .15s;
+}
+.gl-more:hover { color: var(--gold); border-color: var(--gold); }
+.gl-arrow {
+  width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--card); border: 2px solid var(--line-2); color: var(--text);
+  transition: background .15s, border-color .15s, color .15s;
+}
+.gl-arrow:hover { background: var(--gold); border-color: var(--gold); color: var(--bg); }
+.gl-arrow svg { width: 16px; height: 16px; }
+
+/* the track scrolls sideways inside its own box; its scrollbar is hidden */
+.gl-track {
+  display: flex; gap: 16px; margin: 0 -4px; padding: 8px 4px 22px;
+  overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory; scroll-padding-inline: 4px; scrollbar-width: none;
+}
+.gl-track::-webkit-scrollbar { display: none; }
+.gl-row.open .gl-track { flex-wrap: wrap; overflow: visible; scroll-snap-type: none; }
+
+/* game card: gradient from --c1 to --c2, art on top, name below */
+.gc {
+  position: relative; isolation: isolate; flex: 0 0 auto; width: 190px; aspect-ratio: 3 / 4;
+  display: flex; flex-direction: column; overflow: hidden; border-radius: 18px; color: #fff;
+  background: radial-gradient(120% 70% at 50% 0%, rgba(255, 255, 255, .24), transparent 60%), linear-gradient(165deg, var(--c1), var(--c2));
+  box-shadow: 0 16px 28px -18px rgba(0, 0, 0, .95), inset 0 0 0 1px rgba(255, 255, 255, .1);
+  scroll-snap-align: start; transition: transform .2s ease, box-shadow .2s ease;
+}
+.gc::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; z-index: 0; height: 52%; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, .55));
+}
+.gc:hover, .gc:focus-visible { transform: translateY(-4px); box-shadow: 0 24px 36px -18px rgba(0, 0, 0, .95), 0 0 0 2px var(--gold); }
+.gc:focus-visible { outline: none; }
+.gc-top { position: absolute; left: 10px; top: 10px; z-index: 2; display: flex; align-items: center; gap: 6px; }
+.gc-coin { display: block; }
+.gc-coin .gcoin { display: block; width: 30px; height: 30px; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .5)); }
+/* .gc-tag also carries .hot, .live or .new; reset the global .hot badge (absolute, rotated) */
+.gc .gc-tag {
+  position: static; top: auto; right: auto; transform: none; border: 0;
+  display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 99px;
+  font-family: var(--head); font-size: 11px; line-height: 1; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--bg); background: var(--gold); box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+}
+.gc .gc-tag.live { background: var(--red); color: #fff; }
+.gc .gc-tag.new { background: var(--green); color: var(--bg); }
+.gc-fav {
+  position: absolute; right: 10px; top: 10px; z-index: 2; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; background: rgba(8, 10, 16, .45); backdrop-filter: blur(4px);
+  transition: transform .15s, color .15s;
+}
+.gc-fav:hover { transform: scale(1.08); }
+.gc-fav svg { width: 17px; height: 17px; }
+.gc-fav.on { color: var(--red); }
+.gc-fav.on svg { fill: currentColor; }
+.gc-art { position: relative; z-index: 1; flex: 1; min-height: 0; display: grid; place-items: center; padding: 46px 16px 4px; }
+.gc-art svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 12px 14px rgba(0, 0, 0, .45)); transition: transform .3s cubic-bezier(.2, .8, .2, 1); }
+.gc:hover .gc-art svg { transform: scale(1.06) rotate(-2deg); }
+.gc-name {
+  position: relative; z-index: 1; padding: 0 14px; font-family: var(--head); font-size: 22px; line-height: 1.02;
+  text-transform: uppercase; letter-spacing: .02em; color: #fff; text-shadow: 0 2px 10px rgba(0, 0, 0, .5);
+}
+.gc-sub {
+  position: relative; z-index: 1; padding: 4px 14px 14px; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  color: rgba(255, 255, 255, .78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* the chips filter the grid instead of the rows */
+.gl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 22px 18px; margin-top: 26px; }
+.gl-grid .gc { width: auto; }
+.gl-empty { grid-column: 1 / -1; }
+
+.gl-sec { margin-top: 46px; }
+
+@media (max-width: 900px) {
+  .gl-hero { grid-template-columns: 1fr; padding: 28px 26px; }
+}
+@media (max-width: 700px) {
+  .gl-hero { gap: 22px; padding: 22px 18px; border-radius: 22px; }
+  .gl-hero h1 { font-size: 32px; }
+  .gl-hero p { font-size: 15px; }
+  .gl-live-card { padding: 14px 16px; }
+  .gl-tools { gap: 10px; margin-top: 20px; }
+  .gl-chips { flex-wrap: nowrap; overflow-x: auto; width: 100%; padding-bottom: 4px; scrollbar-width: none; }
+  .gl-chips::-webkit-scrollbar { display: none; }
+  .gl-chips .chip { flex: none; }
+  .gl-search { min-width: 0; width: 100%; margin-left: 0; }
+  .gl-row { margin-top: 28px; }
+  .gl-row-head h2 { font-size: 20px; }
+  .gl-arrow { display: none; }
+  .gl-track { gap: 14px; margin: 0 -16px; padding: 8px 16px 22px; scroll-padding-inline: 16px; }
+  .gl-row.open .gl-track { margin: 0; padding: 8px 0 0; }
+  .gc { width: 164px; }
+  .gl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+  .gl-sec { margin-top: 36px; }
+  /* latest bets: game, player, bet, multiplier, payout in a narrow row */
+  .gl .feed:has(.fc-game) .fi, .gl .feed:has(.fc-game) .open-tag { display: none; }
+  .gl .feed:has(.fc-game) .feed-row { padding: 9px 10px; gap: 6px; font-size: 13px; }
+  .gl .fc-player .avatar { display: none; }
+  .gl .fc-bet .gcoin, .gl .fc-pay .gcoin { display: none; }
+}
+
+/* ---------- 2. Bet feeds ---------- */
+.feed-wrap {
+  min-width: 0; margin-top: 12px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+}
+.feed { min-width: 0; font-variant-numeric: tabular-nums; }
+.feed-row {
+  position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  align-items: center; gap: 10px; min-width: 0; padding: 11px 16px;
+  font-size: 14px; border-bottom: 1px solid var(--line); transition: background .15s;
+}
+.feed-row:last-child { border-bottom: 0; }
+.feed-row > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.feed-row > span:last-child { justify-self: end; text-align: right; }
+/* the game column needs more room: five cells share one row */
+.feed:has(.fc-game) .feed-row { grid-auto-flow: row; grid-template-columns: minmax(0, 1.5fr) repeat(4, minmax(0, 1fr)); }
+.feed-row:not(.feed-head):hover { background: rgba(255, 255, 255, .025); }
+.feed-head { padding-top: 9px; padding-bottom: 9px; background: rgba(255, 255, 255, .02); }
+.feed-head > span { font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.feed-row.mine { background: rgba(234, 200, 55, .07); box-shadow: inset 3px 0 0 var(--gold); }
+.feed-empty { padding: 26px 16px; text-align: center; font-size: 14px; font-weight: 600; color: var(--muted); }
+
+.fc-game { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fc-game b { min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-game .fi {
+  flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px;
+  color: var(--gold); background: rgba(255, 255, 255, .06);
+}
+.fc-game .fi svg { width: 16px; height: 16px; }
+.open-tag {
+  flex: none; padding: 2px 7px; border-radius: 99px; font-style: normal; font-size: 10px; font-weight: 800;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--green);
+  background: rgba(20, 241, 149, .12); border: 1px solid rgba(20, 241, 149, .4);
+}
+.fc-player { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.feed .avatar { width: 24px; height: 24px; font-size: 11px; border-width: 0; box-shadow: none; }
+.fc-player .who-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fc-bet { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; }
+.fc-bet .gcoin { width: 14px; height: 14px; }
+.fc-mult { font-family: var(--head); font-size: 15px; color: var(--muted); }
+.fc-mult.hi { color: var(--gold); }
+.fc-mult.zero { color: var(--faint); }
+.fc-mult:has(.live-dot) { font-family: inherit; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--red); }
+.fc-pay { display: inline-flex; align-items: center; gap: 4px; font-weight: 800; color: var(--muted); }
+.fc-pay .gcoin { width: 14px; height: 14px; }
+.fc-pay.win { color: var(--green); }
+.fc-pay.lose { color: var(--red); }
+.fc-side { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.fc-side.red { color: #ff7d91; }
+.fc-side.black { color: #cdd3e4; }
+.fc-side.green { color: var(--green); }
+
+.live-dot {
+  display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%;
+  background: var(--red); vertical-align: 1px; font-style: normal;
+}
+.live-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 99px;
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--red); background: rgba(255, 92, 122, .12);
+}
+.live-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ---------- 3. Pager ---------- */
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 12px 14px 14px; }
+.pager .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 104px; border-radius: 99px; }
+.pager .btn:disabled, .pager .btn:disabled:hover { opacity: .35; cursor: not-allowed; background: transparent; color: var(--muted); border-color: var(--line-2); transform: none; }
+.pager-at { min-width: 72px; text-align: center; font-size: 13px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- 4. Game frame heading ---------- */
+.gp-head { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 18px; }
+.gp-back {
+  flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%;
+  color: var(--muted); background: var(--card); border: 2px solid var(--line-2);
+  transition: color .15s, border-color .15s;
+}
+.gp-back:hover { color: var(--gold); border-color: var(--gold); }
+.gp-back svg { width: 18px; height: 18px; }
+.gp-badge {
+  flex: none; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 15px; color: #fff;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, .25), transparent 60%), linear-gradient(160deg, var(--c1), var(--c2));
+  box-shadow: 0 10px 18px -10px rgba(0, 0, 0, .9), inset 0 0 0 1px rgba(255, 255, 255, .12);
+}
+.gp-badge i { display: block; width: 26px; height: 26px; }
+.gp-badge svg { display: block; width: 100%; height: 100%; }
+.gp-title { min-width: 0; }
+.gp-title h1 { font-size: 30px; line-height: 1; color: #fff; }
+.gp-title small { display: block; margin-top: 5px; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.gp-rtp {
+  flex: none; padding: 7px 12px; border-radius: 99px; white-space: nowrap;
+  font-size: 13px; font-weight: 700; color: var(--muted);
+  background: rgba(234, 200, 55, .08); border: 1px solid rgba(234, 200, 55, .22);
+}
+.gp-rtp b { margin-left: 2px; font-weight: 800; color: var(--gold); }
+
+.gp-sec { min-width: 0; margin-top: 24px; }
+.gp-sec-head { display: flex; align-items: center; gap: 10px; }
+.gp-sec-head h3 { display: flex; align-items: center; gap: 8px; font-family: var(--head); font-weight: 400; font-size: 20px; color: #fff; }
+.gp-sec-head h3 svg { width: 16px; height: 16px; color: var(--red); }
+
+/* heading over a round table's feed: text, then a hairline */
+.dbl-feed-head {
+  display: flex; align-items: center; gap: 10px; margin-top: 4px;
+  font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+}
+.dbl-feed-head::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* ---------- 5. Chips ---------- */
+/* a stack of discs on a spot; the discs are offset upwards by --i */
+.chipstack {
+  position: absolute; left: 50%; bottom: 5px; z-index: 3; width: 26px; height: 26px; margin-left: -13px; pointer-events: none;
+}
+.chipstack .disc {
+  position: absolute; left: 0; bottom: calc(var(--i, 0) * 3px); width: 26px; height: 26px; border-radius: 50%;
+  background: var(--cc); box-shadow: 0 2px 0 rgba(0, 0, 0, .45), inset 0 0 0 2px rgba(0, 0, 0, .22);
+}
+.chipstack .disc::before {
+  content: ""; position: absolute; inset: 4px; border-radius: 50%; border: 2px dashed rgba(255, 255, 255, .75);
+}
+.chipstack > b {
+  position: absolute; right: -10px; top: -14px; min-width: 22px; height: 17px; padding: 0 6px; border-radius: 99px;
+  font-size: 10.5px; font-weight: 800; line-height: 17px; text-align: center; white-space: nowrap; color: #fff;
+  background: rgba(8, 10, 16, .92); border: 1px solid rgba(234, 200, 55, .6); box-shadow: 0 2px 6px rgba(0, 0, 0, .5);
+}
+
+/* the chip picker: a round chip with a dashed inner ring */
+.rl-chips { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding: 6px 0 2px; }
+.chipbtn {
+  position: relative; display: grid; place-items: center; width: 100%; min-width: 0; aspect-ratio: 1;
+  border: 0; border-radius: 50%; color: #fff; background: var(--cc);
+  box-shadow: inset 0 0 0 4px rgba(0, 0, 0, .22), 0 4px 0 rgba(0, 0, 0, .45), 0 8px 14px -4px rgba(0, 0, 0, .6);
+  transition: transform .14s, box-shadow .14s, opacity .15s;
+}
+.chipbtn::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; border: 2px dashed rgba(255, 255, 255, .75); pointer-events: none; }
+.chipbtn b { position: relative; font-size: 10px; font-weight: 800; line-height: 1; letter-spacing: .01em; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+.chipbtn:hover:not(:disabled) { transform: translateY(-2px); }
+.chipbtn.on {
+  transform: translateY(-5px);
+  box-shadow: inset 0 0 0 4px rgba(0, 0, 0, .22), 0 0 0 3px var(--bg), 0 0 0 5px var(--gold), 0 12px 16px -4px rgba(0, 0, 0, .6);
+}
+.chipbtn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---------- 6. Double ---------- */
+.dbl-wrap { position: relative; display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 760px; }
+.dbl-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.dbl-round { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dbl-round > span { font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.dbl-round > b { font-family: var(--head); font-weight: 400; font-size: 22px; line-height: 1.1; color: #fff; }
+.dbl-clock > span { font-family: var(--head); font-size: 40px; line-height: 1; color: var(--gold); font-variant-numeric: tabular-nums; text-shadow: 0 0 22px rgba(234, 200, 55, .35); }
+
+/* the bar is scaled from the left by the JS, so the fill is full size */
+.dbl-bar { height: 8px; overflow: hidden; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); }
+.dbl-bar i {
+  display: block; width: 100%; height: 100%; border-radius: 99px;
+  transform-origin: 0 50%; transform: scaleX(0);
+  background: linear-gradient(90deg, #b8860b, var(--gold) 60%, #fff3b0);
+}
+
+/* the wheel strip: tiles are 54px wide with an 8px gap, as the JS positions them */
+.db-window.dbl-window {
+  position: relative; height: 96px; overflow: hidden; border-radius: 18px;
+  background: var(--bg); border: 2px solid var(--line); box-shadow: inset 0 0 40px rgba(0, 0, 0, .6);
+  transition: border-color .25s, box-shadow .25s;
+}
+.db-window::before, .db-window::after { content: ""; position: absolute; top: 0; bottom: 0; width: 18%; z-index: 2; pointer-events: none; }
+.db-window::before { left: 0; background: linear-gradient(90deg, var(--bg), transparent); }
+.db-window::after { right: 0; background: linear-gradient(270deg, var(--bg), transparent); }
+.db-strip { position: absolute; left: 0; top: 14px; display: flex; gap: 8px; will-change: transform; }
+.db-tile {
+  flex: none; width: 54px; height: 64px; display: grid; place-items: center; border-radius: 12px;
+  font-family: var(--head); font-size: 22px; color: #fff;
+  box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .28), inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+.db-tile.red { background: linear-gradient(180deg, #f0465f, #b81d36); }
+.db-tile.black { background: linear-gradient(180deg, #2e3548, #141824); }
+.db-tile.green { background: linear-gradient(180deg, #34eca0, #0e9a5b); color: #03240f; }
+.db-marker { position: absolute; left: 50%; top: 0; bottom: 0; z-index: 3; width: 3px; margin-left: -1.5px; background: var(--gold); box-shadow: 0 0 14px rgba(234, 200, 55, .9); }
+.db-marker::before, .db-marker::after { content: ""; position: absolute; left: 50%; margin-left: -8px; border: 8px solid transparent; }
+.db-marker::before { top: 0; border-top: 10px solid var(--gold); }
+.db-marker::after { bottom: 0; border-bottom: 10px solid var(--gold); }
+.db-window.won { border-color: var(--green); box-shadow: inset 0 0 40px rgba(0, 0, 0, .6), 0 0 30px -8px rgba(20, 241, 149, .7); }
+.db-window.lost { border-color: rgba(255, 92, 122, .55); }
+
+.dbl-history { display: flex; align-items: center; gap: 6px; min-height: 28px; overflow: hidden; }
+.db-h {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%;
+  font-size: 12px; font-weight: 800; color: #fff; box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .3);
+}
+.db-h.red { background: #d02c47; }
+.db-h.black { background: #232838; }
+.db-h.green { background: #1fae6a; color: #03240f; }
+.db-none { font-size: 13px; color: var(--faint); }
+
+/* the result card sits over the wheel: 104px above this anchor, the window's centre */
+.dbl-res-anchor { position: relative; height: 0; }
+.dbl-res-anchor .result-pop { top: -104px; }
+
+/* the three bet buttons, in the side panel */
+.dbl-bets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.dbl-bet {
+  position: relative; display: grid; justify-items: center; gap: 2px; padding: 12px 6px 10px;
+  color: #fff; border: 2px solid rgba(255, 255, 255, .12); border-radius: 16px;
+  box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .28);
+  transition: transform .14s, filter .14s;
+}
+.dbl-bet.red { background: linear-gradient(180deg, #f0465f, #b81d36); }
+.dbl-bet.black { background: linear-gradient(180deg, #2e3548, #141824); }
+.dbl-bet.green { background: linear-gradient(180deg, #34eca0, #0e9a5b); color: #03240f; }
+.dbl-bet > b { font-family: var(--head); font-weight: 400; font-size: 18px; line-height: 1.1; }
+.dbl-bet > small { font-size: 11px; font-weight: 700; opacity: .8; }
+.dbl-bet-tot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px 4px; min-height: 18px; margin-top: 4px; font-size: 13px; font-weight: 800; }
+.dbl-bet-tot .gcoin { width: 13px; height: 13px; }
+.dbl-bet-tot small { font-size: 10px; font-weight: 700; opacity: .85; }
+.dbl-bet-tot em { font-style: normal; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 99px; background: rgba(0, 0, 0, .35); }
+.dbl-bet:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.08); }
+.dbl-bet:disabled { opacity: .5; filter: saturate(.5); cursor: not-allowed; }
+
+/* ---------- 7. Crash ---------- */
+.cr-top { align-items: center; }
+.cr-history {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 2px 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.cr-history::-webkit-scrollbar { display: none; }
+.cr-h { flex: none; padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.cr-h.good { background: rgba(20, 241, 149, .14); color: var(--green); }
+.cr-h.bad { background: rgba(255, 92, 122, .14); color: var(--red); }
+.cr-none { font-size: 13px; color: var(--faint); }
+
+/* the multiplier readout: colour follows the state */
+.cr-read > b.cr-big { font-family: var(--head); font-weight: 400; }
+.cr-read > b.cr-big.wait { color: rgba(255, 255, 255, .88); }
+.cr-read > b.cr-big.flying { color: var(--green); text-shadow: 0 0 30px rgba(20, 241, 149, .45), 0 4px 0 rgba(0, 0, 0, .35); }
+.cr-read > b.cr-big.crashed { color: var(--red); text-shadow: 0 0 30px rgba(255, 92, 122, .55), 0 4px 0 rgba(0, 0, 0, .35); }
+
+.cr-auto { display: grid; gap: 8px; margin-bottom: 14px; }
+.cr-auto-row { display: grid; gap: 8px; }
+.cr-auto-row input {
+  width: 100%; height: 46px; padding: 0 13px; border-radius: 11px; outline: 0;
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  font-weight: 700; font-variant-numeric: tabular-nums; transition: border-color .15s, box-shadow .15s;
+}
+.cr-auto-row input::placeholder { color: var(--faint); font-weight: 500; }
+.cr-auto-row input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(234, 200, 55, .14); }
+.cr-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.cr-presets button {
+  height: 36px; border-radius: 10px; font-size: 13px; font-weight: 800; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--line); transition: background .15s, color .15s, border-color .15s;
+}
+.cr-presets button:hover { color: var(--text); background: var(--panel-3); }
+.cr-presets button.on { color: var(--gold); border-color: var(--gold); background: rgba(234, 200, 55, .12); }
+
+/* ---------- 8. Baccarat ---------- */
+.bc-spot {
+  position: relative; height: auto; min-height: 72px; gap: 2px; padding: 10px 8px;
+}
+.bc-spot.has {
+  border-color: var(--gold); background: rgba(234, 200, 55, .1);
+  box-shadow: inset 0 0 0 1px rgba(234, 200, 55, .4), 0 0 0 2px rgba(234, 200, 55, .18);
+}
+.bc-spot.win {
+  border-color: var(--green); background: rgba(20, 241, 149, .14);
+  box-shadow: 0 0 0 3px rgba(20, 241, 149, .18), 0 0 26px rgba(20, 241, 149, .55);
+  animation: none; /* replaces the gold pulse from games.css */
+}
+.bc-spot-tag { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.bc-spot-tag b { font-family: var(--head); font-weight: 400; font-size: 17px; line-height: 1.1; text-transform: uppercase; letter-spacing: .04em; }
+.bc-spot-tag small { font-size: 11px; font-weight: 700; letter-spacing: .04em; opacity: .75; }
+.bc-card-row { display: flex; align-items: center; justify-content: center; min-height: 118px; }
+.bc-score { min-width: 46px; font-variant-numeric: tabular-nums; }
+.bc-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 10px; width: 100%; max-width: 620px; }
+.bc-actions .gbtn { width: 100%; }
+.bc-hint { text-align: center; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, .6); }
+.bc-none { font-size: 13px; color: rgba(255, 255, 255, .5); }
+
+/* ---------- 9. Roulette ---------- */
+.rl-cell:hover { filter: brightness(1.2); box-shadow: inset 0 0 0 2px rgba(234, 200, 55, .55); }
+
+/* ---------- 10. Keno ---------- */
+.kn-tile:hover:not(:disabled):not(.hit):not(.miss):not(.pick) {
+  color: #fff; transform: translateY(-2px);
+  background: linear-gradient(180deg, #414c6e, #2f3852);
+  box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .28), 0 0 0 2px rgba(234, 200, 55, .6);
+}
+/* the gem sits over the tile's top-right corner; it is appended into .kn-tile on a hit */
+.kn-tile .kn-gem { position: absolute; right: -7px; top: -9px; z-index: 3; width: 46%; aspect-ratio: 1; pointer-events: none; }
+.kn-gem svg {
+  display: block; width: 100%; height: 100%; overflow: visible;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .45)) drop-shadow(0 0 8px rgba(20, 241, 149, .7));
+}
+.kn-gem i {
+  position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px;
+  background: #fff; opacity: 0;
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+}
+.kn-gem i:nth-of-type(1) { --sx: -22px; --sy: -20px; }
+.kn-gem i:nth-of-type(2) { --sx: 24px; --sy: -14px; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; }
+.kn-gem i:nth-of-type(3) { --sx: 4px; --sy: 26px; width: 6px; height: 6px; margin: -3px 0 0 -3px; }
+
+/* ---------- 11. Small game frames ---------- */
+@container bbg (max-width: 560px) {
+  .gp-head { gap: 10px; margin-bottom: 14px; }
+  .gp-badge { width: 42px; height: 42px; border-radius: 13px; }
+  .gp-title h1 { font-size: 24px; }
+  .gp-rtp { padding: 5px 9px; font-size: 12px; }
+  .gp-sec { margin-top: 18px; }
+  .feed-row { gap: 6px; padding: 9px 10px; font-size: 13px; }
+  .feed-head > span { font-size: 10px; letter-spacing: .08em; }
+  .fc-player .avatar { display: none; }
+  .fc-bet .gcoin, .fc-pay .gcoin { display: none; }
+  .fc-mult { font-size: 14px; }
+  .dbl-bet > b { font-size: 16px; }
+  .chipbtn b { font-size: 10px; }
+  .rl-chips { gap: 4px; }
+  .cr-h { padding: 3px 8px; font-size: 11px; }
+  .bc-spot-tag b { font-size: 15px; }
+  .bc-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); }
+}
+
+/* ---------- 12. Motion ---------- */
+@keyframes a-livedot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 92, 122, .6); }
+  50% { box-shadow: 0 0 0 5px rgba(255, 92, 122, 0); }
+}
+@keyframes a-blink { 50% { opacity: .35; } }
+@keyframes a-discpop {
+  0% { transform: translateY(-18px) scale(.6); opacity: 0; }
+  70% { transform: translateY(2px) scale(1.06); opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes a-gempop {
+  0% { transform: scale(0) rotate(-40deg); opacity: 0; }
+  55% { transform: scale(1.25) rotate(8deg); opacity: 1; }
+  78% { transform: scale(.94) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+@keyframes a-sparkle {
+  0% { opacity: 0; transform: translate(0, 0) scale(.2); }
+  35% { opacity: 1; transform: translate(calc(var(--sx) * .5), calc(var(--sy) * .5)) scale(1.1); }
+  100% { opacity: 0; transform: translate(var(--sx), var(--sy)) scale(.3) rotate(90deg); }
+}
+@keyframes a-winglow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(20, 241, 149, .18), 0 0 26px rgba(20, 241, 149, .55); }
+  50% { box-shadow: 0 0 0 5px rgba(20, 241, 149, .3), 0 0 40px rgba(20, 241, 149, .85); }
+}
+@keyframes a-crashshake {
+  20% { transform: translateX(-6px); } 40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); } 80% { transform: translateX(2px); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot, .live-pill::before { animation: a-livedot 1.4s ease-in-out infinite; }
+  .gl-live-tag svg, .gl-sec .gl-row-head h2 svg, .gp-sec-head h3 svg { animation: a-blink 1.4s ease-in-out infinite; }
+  .chipstack .disc:last-of-type { animation: a-discpop .34s cubic-bezier(.2, 1.5, .4, 1) both; }
+  .bc-spot.win { animation: a-winglow .9s ease-out 3; }
+  .cr-read > b.cr-big.crashed { animation: a-crashshake .45s ease-in-out; }
+  .kn-gem { animation: a-gempop .55s cubic-bezier(.3, 1.5, .5, 1) both; }
+  .kn-gem i { animation: a-sparkle .7s ease-out .3s both; }
+  .kn-gem i:nth-of-type(2) { animation-delay: .36s; }
+  .kn-gem i:nth-of-type(3) { animation-delay: .42s; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gc, .gc-art svg, .gc-fav, .gl-live-card, .gl-arrow, .dbl-bet, .chipbtn { transition: none; }
+}
+
+/* ---------- polish: bet amount field and chip labels ---------- */
+/* the amount sits inside its pill: the input drops the generic field box so the coin and value line up */
+.gfield .gamount { height: 46px; }
+.gfield .gamount input[type=text] { flex: 1; width: auto; min-width: 0; height: 100%; padding: 0 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
