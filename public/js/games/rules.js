@@ -52,7 +52,7 @@ window.GG.rules = {
     max: '120×', risk: 'Low pays back on a single pair. High pays nothing for a pair but much more for rare hands.',
   },
   double: {
-    how: ['Pick a colour: red, black or green.', 'The strip spins and stops on one of 15 tiles — seven red, seven black and one green.', 'Red and black pay 2×. Green pays 14×.'],
+    how: ['Everyone plays the same round. Betting is open for 10 seconds: set your amount and press Place bet under red, green or black, as often as you like.', 'Every bet in the round shows in the three columns, with the player and the amount.', 'When the timer runs out the reel rolls and stops on one of 15 tiles: seven red, seven black and one green.', 'Red and black pay 2×. Green pays 14×. The column that won lights up with what each player gets back.'],
     max: '14.00×', risk: 'Red and black win 7 times in 15. Green wins once in 15. The edge is higher here than in the other games.',
   },
   coinflip: {

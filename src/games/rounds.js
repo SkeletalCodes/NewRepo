@@ -80,7 +80,10 @@ async function view(game, userId) {
   const now = Date.now();
   const bets = r ? await db.all(`SELECT b.id, b.user_id, b.amount, b.status, b.payout, b.multiplier, b.state, u.username, u.avatar_color
     FROM bets b JOIN users u ON u.id = b.user_id WHERE b.round_id = ? ORDER BY b.id DESC LIMIT 200`, r.id) : [];
-  const history = await db.all("SELECT seq, result FROM rounds WHERE game = ? AND phase = 'done' ORDER BY seq DESC LIMIT 30", game);
+  // Double also counts the colours of its last 100 rolls
+  const history = (await db.all(`SELECT seq, result FROM rounds WHERE game = ? AND phase = 'done' ORDER BY seq DESC LIMIT ${game === 'double' ? 100 : 30}`, game))
+    .map((h) => ({ seq: h.seq, result: parse(h.result) }));
+  const stats = game === 'double' ? history.reduce((c, h) => { c[h.result.color] = (c[h.result.color] || 0) + 1; return c; }, { red: 0, black: 0, green: 0 }) : undefined;
   return {
     now,
     round: r && {
@@ -88,9 +91,11 @@ async function view(game, userId) {
       // the climb is public: the multiplier is only the time since launch, never the crash point
       mult: game === 'crash' && r.phase === 'playing' ? floor2(Math.exp(CRASH_RATE * (now - r.play_at))) : undefined,
       rate: game === 'crash' ? CRASH_RATE : undefined,
-      result: r.phase === 'done' ? parse(r.result) : undefined,
+      // Double's number is shown once betting has closed, so the reel can roll straight to it; Crash keeps its point hidden until it crashes
+      result: r.phase === 'done' || (game === 'double' && r.phase === 'playing') ? parse(r.result) : undefined,
     },
-    history: history.map((h) => ({ seq: h.seq, result: parse(h.result) })),
+    history: history.slice(0, 30),
+    stats,
     bets: bets.map((b) => {
       const s = parse(b.state);
       return {

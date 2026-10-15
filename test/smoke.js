@@ -460,6 +460,8 @@ async function postback(url, opts) {
     assert.equal((await g('/games/rounds/double/bet', { amount: 50, params: { side: 'purple' } })).status, 400, 'unknown colour');
     dv = await waitFor('double', (v) => v.round.phase === 'playing' && v.round.seq === dseq);
     assert.equal((await g('/games/rounds/double/bet', { amount: 100, params: { side: 'black' } })).status, 400, 'no bets while the wheel spins');
+    assert.ok(dv.round.result && Number.isInteger(dv.round.result.n), 'the number is shown once betting has closed');
+    assert.ok(dv.stats && 'red' in dv.stats, 'last-100 colour counts');
     dv = await waitFor('double', (v) => v.history.some((h) => h.seq === dseq));
     const color = dv.history.find((h) => h.seq === dseq).result.color;
     const mine2 = (await g('/games/bets?game=double')).data.bets.slice(0, 2); // newest first: green 200, red 100

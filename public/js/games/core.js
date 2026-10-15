@@ -924,7 +924,6 @@
           <h1>Nineteen games. One balance.</h1>
           <p>Bet on the house games, watch the table fill up live and cash out before the rocket goes. 18+ only.</p>
         </div>
-        <div class="gl-hero-live" id="gl-hero-live"></div>
       </section>
       <div class="gl-tools">
         <div class="gl-chips" id="gl-cats">
@@ -1054,24 +1053,15 @@
   /** The two timed games: their phase in the hero and on their cards, refreshed every second. */
   const roundViews = {};
   async function paintRoundTiles() {
-    const hero = $('#gl-hero-live');
-    if (!hero) return;
+    if (!$('#gl-rows')) return;
     for (const id of TIMED_IDS) {
-      try { roundViews[id] = { ...(await GR.api(`/games/rounds/${id}`)), _at: Date.now() }; } catch { /* keep the last */ }
-      const v = roundViews[id];
+      // refetch every few seconds; the countdown in between runs on the server clock we already have
+      if (!roundViews[id] || Date.now() - roundViews[id]._at > 3000) {
+        try { roundViews[id] = { ...(await GR.api(`/games/rounds/${id}`)), _at: Date.now() }; } catch { /* keep the last */ }
+      }
       const sub = $(`[data-phase="${id}"]`);
-      if (sub && v) sub.textContent = phaseText(id, v);
+      if (sub && roundViews[id]) sub.textContent = phaseText(id, roundViews[id]);
     }
-    hero.innerHTML = TIMED_IDS.map((id) => {
-      const g = games[id], v = roundViews[id];
-      const bets = v ? v.bets.length : 0;
-      return `<a href="#/games/${id}" class="gl-live-card" style="--c1:${g.colors[0]};--c2:${g.colors[1]}">
-        <span class="gl-live-tag">${ic('live', 12)} Live</span>
-        <span class="gl-live-name">${esc(g.name)}</span>
-        <span class="gl-live-phase">${v ? esc(phaseText(id, v)) : 'Connecting…'}</span>
-        <span class="gl-live-meta">${bets} bet${bets === 1 ? '' : 's'} this round</span>
-      </a>`;
-    }).join('');
   }
 
   /* ---------- exports ---------- */
