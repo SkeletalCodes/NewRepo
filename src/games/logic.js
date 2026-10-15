@@ -8,7 +8,8 @@
  * Round games:    start(rng, params) -> state
  *                 act(rng, state, action, params) -> { state, done?, mult? }  (rng resumes where the last call stopped)
  *                 view(state, done) -> what the player is allowed to see (never hidden mines, traps, hole cards...)
- * Every game also has check(params) which validates and normalises the player's choices (throws GameError).
+ * Every game also has check(params, { amount, min }) which validates and normalises the player's choices (throws GameError).
+ * A game whose stake isn't just the amount sent (chips, side bets) has stake(params): the route applies the limits to that total.
  */
 
 class GameError extends Error {}
@@ -421,6 +422,45 @@ function bjTotal(cards) {
   while (t > 21 && aces) { t -= 10; aces--; }
   return t;
 }
+
+/* Side bets, decided by the first cards dealt. Pays are "to 1": a win also hands the side bet back. */
+const BJ_SIDES = {
+  pp: { name: 'Perfect Pairs', pays: { perfect: 25, coloured: 12, mixed: 5 } },
+  t3: { name: '21+3', pays: { suited_trips: 100, straight_flush: 40, trips: 30, straight: 10, flush: 5 } },
+};
+/** Perfect Pairs on the player's first two cards: same rank and suit, same rank and colour, or just same rank. */
+function perfectPairs(a, b) {
+  if (a.i !== b.i) return null;
+  if (a.s === b.s) return 'perfect';
+  return a.red === b.red ? 'coloured' : 'mixed';
+}
+/** 21+3 on the player's first two cards and the dealer's up card, best line only. Ace is low (A-2-3) or high (Q-K-A), no wrap. */
+function twentyOne3(cards) {
+  const r = cards.map((c) => c.i).sort((a, b) => a - b);
+  const flush = cards.every((c) => c.s === cards[0].s);
+  if (r[0] === r[2]) return flush ? 'suited_trips' : 'trips';
+  const straight = r[0] !== r[1] && r[1] !== r[2] && (r[2] - r[0] === 2 || r.join() === '0,11,12');
+  if (straight) return flush ? 'straight_flush' : 'straight';
+  return flush ? 'flush' : null;
+}
+/** The side bets' results at the deal (only for the side bets placed). win = cents back, stake included. */
+function bjSides(player, up, bets) {
+  const hands = { pp: perfectPairs(player[0], player[1]), t3: twentyOne3([player[0], player[1], up]) };
+  const side = {};
+  for (const k of Object.keys(BJ_SIDES)) {
+    if (!bets[k]) continue;
+    const pays = hands[k] ? BJ_SIDES[k].pays[hands[k]] : 0;
+    side[k] = { bet: bets[k], hand: hands[k], pays, win: hands[k] ? bets[k] * (pays + 1) : 0 };
+  }
+  return side;
+}
+/** A finished hand pays the main bet (doubled if it was) at its multiplier, plus the side bets, in one amount. */
+function bjPaid(res) {
+  const s = res.state;
+  if (!res.done || !s.main) return res; // a hand dealt before side bets existed: the route pays stake × mult
+  const side = Object.values(s.side || {}).reduce((a, x) => a + x.win, 0);
+  return { ...res, payoutCents: Math.floor(s.main * (s.doubled ? 2 : 1) * res.mult + 1e-9) + side };
+}
 function bjDealer(rng, s) {
   const dealer = [...s.dealer];
   while (bjTotal(dealer) < 17) dealer.push(card(rng));
@@ -429,43 +469,65 @@ function bjDealer(rng, s) {
   const outcome = d > 21 ? 'dealer_bust' : p > d ? 'win' : p === d ? 'push' : 'lose';
   return { state: { ...s, dealer, outcome }, done: true, mult: outcome === 'push' ? 1 : outcome === 'lose' ? 0 : 2 };
 }
+function bjAct(rng, s, action) {
+  if (action === 'hit') {
+    const st = { ...s, player: [...s.player, card(rng)] };
+    const t = bjTotal(st.player);
+    if (t > 21) return { state: { ...st, outcome: 'bust' }, done: true, mult: 0 };
+    if (t === 21) return bjDealer(rng, st);
+    return { state: st };
+  }
+  if (action === 'stand') return bjDealer(rng, s);
+  if (action === 'double') {
+    if (s.player.length !== 2) fail('You can only double on your first two cards.');
+    const st = { ...s, doubled: true, player: [...s.player, card(rng)] };
+    if (bjTotal(st.player) > 21) return { state: { ...st, outcome: 'bust' }, done: true, mult: 0 };
+    return bjDealer(rng, st);
+  }
+  fail('Unknown move.');
+}
+const usd = (c) => `$${(c / 100).toFixed(2)}`;
 const blackjack = {
-  name: 'Blackjack', rtp: 99.5, round: true,
-  check: () => ({}),
-  start(rng) {
+  name: 'Blackjack', rtp: 99.5, round: true, SIDES: BJ_SIDES, perfectPairs, twentyOne3,
+  /** The amount sent is the main bet. Side bets in cents are optional: pp (Perfect Pairs) and t3 (21+3), each 0 or
+   *  between the minimum bet and the main bet. stake() adds them to the main bet, so the route's limits and its
+   *  single debit cover the whole hand. Doubling adds the main bet only. */
+  check(p, { amount, min = 1 } = {}) {
+    const out = { bet: Math.floor(Number(amount)), pp: 0, t3: 0 };
+    for (const k of Object.keys(BJ_SIDES)) {
+      const v = Math.floor(Number(p[k] || 0));
+      if (!(v >= 0)) fail(`Enter a valid ${BJ_SIDES[k].name} bet.`);
+      if (v === 0) continue;
+      if (v < min) fail(`The minimum ${BJ_SIDES[k].name} bet is ${usd(min)}.`);
+      if (!(v <= out.bet)) fail(`${BJ_SIDES[k].name} can't be more than your main bet.`);
+      out[k] = v;
+    }
+    return out;
+  },
+  stake: (p) => p.bet + p.pp + p.t3,
+  start(rng, params = {}) {
     const player = [card(rng)];
     const dealer = [card(rng)];
     player.push(card(rng));
     dealer.push(card(rng)); // hole card, hidden until the end
-    return { player, dealer, doubled: false };
+    const s = { player, dealer, doubled: false };
+    // side bets only look at the player's cards and the dealer's up card, so their results can be shown at once
+    if (params.bet) Object.assign(s, { main: params.bet, side: bjSides(player, dealer[0], params) });
+    return s;
   },
-  /** Natural blackjacks settle immediately. */
+  /** Natural blackjacks settle immediately (side bets included). */
   instant(s) {
     const pBJ = bjTotal(s.player) === 21;
     const dBJ = bjTotal(s.dealer) === 21;
-    if (pBJ) return { state: { ...s, outcome: dBJ ? 'push' : 'blackjack' }, done: true, mult: dBJ ? 1 : 2.5 };
-    if (dBJ) return { state: { ...s, outcome: 'dealer_blackjack' }, done: true, mult: 0 };
+    if (pBJ) return bjPaid({ state: { ...s, outcome: dBJ ? 'push' : 'blackjack' }, done: true, mult: dBJ ? 1 : 2.5 });
+    if (dBJ) return bjPaid({ state: { ...s, outcome: 'dealer_blackjack' }, done: true, mult: 0 });
     return null;
   },
   act(rng, s, action) {
-    if (action === 'hit') {
-      const st = { ...s, player: [...s.player, card(rng)] };
-      const t = bjTotal(st.player);
-      if (t > 21) return { state: { ...st, outcome: 'bust' }, done: true, mult: 0 };
-      if (t === 21) return bjDealer(rng, st);
-      return { state: st };
-    }
-    if (action === 'stand') return bjDealer(rng, s);
-    if (action === 'double') {
-      if (s.player.length !== 2) fail('You can only double on your first two cards.');
-      const st = { ...s, doubled: true, player: [...s.player, card(rng)] };
-      if (bjTotal(st.player) > 21) return { state: { ...st, outcome: 'bust' }, done: true, mult: 0 };
-      return bjDealer(rng, st);
-    }
-    fail('Unknown move.');
+    return bjPaid(bjAct(rng, s, action));
   },
   view(s, done) {
-    return { player: s.player, playerTotal: bjTotal(s.player), doubled: s.doubled, outcome: s.outcome || null,
+    return { player: s.player, playerTotal: bjTotal(s.player), doubled: s.doubled, outcome: s.outcome || null, side: s.side || {},
       dealer: done ? s.dealer : [s.dealer[0]], dealerTotal: done ? bjTotal(s.dealer) : bjTotal([s.dealer[0]]), hidden: !done };
   },
   total: bjTotal,

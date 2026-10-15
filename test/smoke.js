@@ -332,6 +332,115 @@ async function postback(url, opts) {
     }
     assert.equal(bj.status, 'settled');
     assert.ok(bj.view.dealer.length >= 2);
+
+    // blackjack side bets: Perfect Pairs (pp) and 21+3 (t3), in cents, taken with the main bet in one debit
+    {
+      const sdb = require('../src/db').db;
+      const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+      const PP = { perfect: 25, coloured: 12, mixed: 5 };
+      const T3 = { suited_trips: 100, straight_flush: 40, trips: 30, straight: 10, flush: 5 };
+      const ppHand = (a, b) => (a.r !== b.r ? null : a.s === b.s ? 'perfect' : a.red === b.red ? 'coloured' : 'mixed');
+      const t3Hand = (cs) => {
+        const v = cs.map((c) => RANKS.indexOf(c.r)).sort((x, y) => x - y);
+        const suited = new Set(cs.map((c) => c.s)).size === 1;
+        if (new Set(v).size === 1) return suited ? 'suited_trips' : 'trips';
+        const run = new Set(v).size === 3 && (v[2] - v[0] === 2 || String(v) === '0,11,12');
+        return run ? (suited ? 'straight_flush' : 'straight') : suited ? 'flush' : null;
+      };
+      const sideOf = (bet, hand, pays) => ({ bet, hand, pays: hand ? pays[hand] : 0, win: hand ? bet * (pays[hand] + 1) : 0 });
+
+      // limits: each side bet is 0 or between the minimum bet and the main bet; the maximum covers the total
+      const before = (await g('/me')).data.user.balance;
+      r = await g('/games/blackjack/bet', { amount: 100, params: { pp: 101 } });
+      assert.equal(r.status, 400, 'a side bet larger than the main bet is rejected');
+      assert.match(r.data.error, /more than your main bet/);
+      assert.equal((await g('/games/blackjack/bet', { amount: 100, params: { t3: 101 } })).status, 400, '21+3 above the main bet');
+      assert.equal((await g('/games/blackjack/bet', { amount: 100, params: { t3: 5 } })).status, 400, 'side bet below the minimum');
+      assert.equal((await g('/games/blackjack/bet', { amount: 100, params: { pp: -10 } })).status, 400, 'negative side bet');
+      assert.equal((await g('/games/blackjack/bet', { amount: 100, params: { pp: 'lots' } })).status, 400, 'side bet must be a number');
+      assert.equal((await g('/games/blackjack/bet', { amount: 10000, params: { pp: 10 } })).status, 400, 'max bet covers main + side bets');
+      assert.equal((await g('/games/blackjack/bet', { amount: 5, params: {} })).status, 400, 'main bet below the minimum');
+      assert.equal((await g('/me')).data.user.balance, before, 'rejected hands take nothing');
+
+      // play hands until a side bet has paid and a hand has been doubled; check every stake, result and payout
+      const count = async () => (await sdb.get(`SELECT
+          (SELECT COUNT(*) FROM bets WHERE user_id = ? AND game = 'blackjack') AS rows,
+          (SELECT COUNT(*) FROM transactions WHERE user_id = ? AND description = 'Blackjack bet') AS debits,
+          (SELECT COUNT(*) FROM transactions WHERE user_id = ? AND description = 'Blackjack double') AS doubles,
+          (SELECT COUNT(*) FROM transactions WHERE user_id = ? AND type = 'win' AND description LIKE 'Blackjack%') AS credits`, gid, gid, gid, gid));
+      const led0 = await count();
+      const mainMult = { blackjack: 2.5, win: 2, dealer_bust: 2, push: 1 };
+      let balNow = before, hands = 0, paidSides = 0, doubles = 0, credits = 0;
+      while ((paidSides < 1 || doubles < 1) && hands < 250) {
+        hands++;
+        r = await g('/games/blackjack/bet', { amount: 20, params: { pp: 10, t3: 20 } });
+        assert.equal(r.status, 200, JSON.stringify(r.data));
+        let hb = r.data.bet;
+        const v0 = hb.view;
+        assert.equal(hb.amount, 50, 'stake = main + both side bets');
+        assert.deepEqual(hb.params, { bet: 20, pp: 10, t3: 20 });
+        assert.deepEqual(v0.side.pp, sideOf(10, ppHand(v0.player[0], v0.player[1]), PP), 'Perfect Pairs decided from the first two cards');
+        assert.deepEqual(v0.side.t3, sideOf(20, t3Hand([v0.player[0], v0.player[1], v0.dealer[0]]), T3), '21+3 decided from those and the up card');
+        if (hb.status === 'active') {
+          assert.equal(r.data.user.balance, balNow - 50, 'one debit for main + side bets');
+          assert.equal(v0.dealer.length, 1, 'hole card still hidden with side bets');
+          const action = doubles ? 'stand' : 'double';
+          r = await g(`/games/bets/${hb.id}/action`, { action });
+          assert.equal(r.status, 200, JSON.stringify(r.data));
+          hb = r.data.bet;
+          if (action === 'double') { doubles++; assert.equal(hb.amount, 70, 'doubling adds the main bet only'); }
+        }
+        assert.equal(hb.status, 'settled');
+        assert.deepEqual(hb.view.side, v0.side, 'side results do not change after the deal');
+        const main = 20 * (hb.view.doubled ? 2 : 1);
+        const sides = v0.side.pp.win + v0.side.t3.win;
+        assert.equal(hb.payout, Math.floor(main * (mainMult[hb.view.outcome] || 0) + 1e-9) + sides, `payout = main hand + side bets (${hb.view.outcome})`);
+        balNow = balNow - hb.amount + hb.payout;
+        assert.equal(r.data.user.balance, balNow, 'balance moves by the stake and one payout');
+        if (sides) paidSides++;
+        if (hb.payout > 0) credits++;
+      }
+      assert.ok(paidSides >= 1 && doubles >= 1, `saw a side bet pay and a double in ${hands} hands`);
+      const led1 = await count();
+      assert.equal(led1.rows - led0.rows, hands, 'one bet row per hand');
+      assert.equal(led1.debits - led0.debits, hands, 'one debit per hand for main + side bets');
+      assert.equal(led1.doubles - led0.doubles, doubles);
+      assert.equal(led1.credits - led0.credits, credits, 'one credit per paying hand, side bets included');
+
+      // forced cards straight through the rules (they take any number source)
+      const bjl = require('../src/games/logic').GAMES.blackjack;
+      const SUITS = ['♠', '♥', '♦', '♣'];
+      const deal = (...cards) => ({ int: () => { const [r0, s0] = cards.shift(); return 13 * SUITS.indexOf(s0) + RANKS.indexOf(r0); }, float: () => 0 });
+      // order: player, dealer up, player, dealer hole, then draws
+      let st = bjl.start(deal(['8', '♠'], ['8', '♠'], ['8', '♠'], ['9', '♥']), { bet: 100, pp: 10, t3: 10 });
+      assert.deepEqual(st.side, { pp: sideOf(10, 'perfect', PP), t3: sideOf(10, 'suited_trips', T3) });
+      assert.equal(bjl.instant(st), null);
+      assert.ok(!JSON.stringify(bjl.view(st, false)).includes('♥'), 'the view at the deal never carries the hole card');
+      let res = bjl.act(deal(), st, 'stand');
+      assert.equal(res.state.outcome, 'lose');
+      assert.equal(res.payoutCents, 260 + 1010, 'a lost hand still pays its side bets');
+      st = bjl.start(deal(['A', '♥'], ['Q', '♥'], ['K', '♥'], ['5', '♠']), { bet: 100, pp: 0, t3: 20 });
+      assert.deepEqual(st.side, { t3: sideOf(20, 'straight_flush', T3) }, 'Q-K-A suited is a straight flush; no Perfect Pairs bet, no result');
+      res = bjl.instant(st);
+      assert.equal(res.state.outcome, 'blackjack');
+      assert.equal(res.payoutCents, 250 + 820, 'a natural that settles at once pays the side bets too');
+      st = bjl.start(deal(['8', '♥'], ['A', '♣'], ['8', '♦'], ['K', '♠']), { bet: 100, pp: 10, t3: 10 });
+      assert.equal(st.side.pp.hand, 'coloured');
+      assert.equal(st.side.t3.hand, null);
+      assert.equal(bjl.instant(st).payoutCents, 130, 'dealer blackjack: main lost, coloured pair paid');
+      st = bjl.start(deal(['5', '♠'], ['9', '♣'], ['6', '♠'], ['7', '♦']), { bet: 100, pp: 10, t3: 10 });
+      res = bjl.act(deal(['10', '♠'], ['10', '♣']), st, 'double');
+      assert.equal(res.state.outcome, 'dealer_bust');
+      assert.equal(res.payoutCents, 400, 'a doubled win pays on the doubled main bet only');
+      const c = (r0, s0) => ({ i: RANKS.indexOf(r0), r: r0, s: s0, red: s0 === '♥' || s0 === '♦' });
+      assert.equal(bjl.perfectPairs(c('8', '♥'), c('8', '♣')), 'mixed');
+      assert.equal(bjl.twentyOne3([c('A', '♠'), c('2', '♥'), c('3', '♦')]), 'straight', 'ace low');
+      assert.equal(bjl.twentyOne3([c('K', '♠'), c('A', '♥'), c('2', '♦')]), null, 'no wrap-around');
+      assert.equal(bjl.twentyOne3([c('2', '♣'), c('7', '♣'), c('J', '♣')]), 'flush');
+      assert.equal(bjl.twentyOne3([c('7', '♠'), c('7', '♥'), c('7', '♦')]), 'trips');
+      res = bjl.act(deal(), bjl.start(deal(['10', '♠'], ['9', '♣'], ['7', '♠'], ['8', '♦'])), 'stand');
+      assert.equal(res.payoutCents, undefined, 'hands without a stored stake fall back to stake × multiplier');
+    }
     // timed rounds: a Double round takes several bets; the colour is hidden until the spin ends
     const waitFor = async (game, pred, ms = 9000) => {
       const end = Date.now() + ms;

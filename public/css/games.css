@@ -270,9 +270,32 @@ body.theatre .livecard { left: 16px; }
 .bj-shoe i { position: absolute; inset: 0; border-radius: 8px; border: 3px solid #fff; background: repeating-linear-gradient(45deg, #ffb52e 0 5px, #f09a14 5px 10px); box-shadow: 0 4px 10px rgba(0, 0, 0, .4); }
 .bj-shoe i:nth-child(1) { transform: translate(6px, -6px); }
 .bj-shoe i:nth-child(2) { transform: translate(3px, -3px); }
-.bj-table .result-pop { top: 44%; }
+.bj-table .result-pop { top: 45%; width: max-content; max-width: calc(100% - 20px); padding: 10px 24px; }
+.bj-table .result-pop b { font-size: 30px; }
 .bj-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
 .bj-actions .gbtn { padding: 0; height: 46px; }
+.bj-sides { display: grid; gap: 7px; margin-bottom: 14px; }
+.bj-sides > .gfield-l b { color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.bj-side { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; transition: opacity .15s; }
+.bj-side-l { font-size: 13px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.bj-side .gamount { height: 38px; gap: 4px; padding: 0 4px 0 10px; }
+.bj-side .gamount input[type=text] { font-size: 15px; }
+.bj-side .gamount button { height: 28px; min-width: 30px; padding: 0 6px; }
+.bj-side.bad .gamount { border-color: var(--lose); box-shadow: 0 0 0 3px rgba(255, 92, 122, .14); }
+.bj-side.locked { opacity: .55; }
+.bj-sbadges { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 100%; }
+.bj-sbadges:empty { display: none; }
+.bj-badge {
+  max-width: 100%; padding: 4px 11px; border-radius: 99px; font-size: 12px; font-weight: 600; line-height: 1.35; text-align: center;
+  background: rgba(0, 0, 0, .4); color: rgba(255, 255, 255, .5); font-variant-numeric: tabular-nums; animation: g-rowIn .3s both;
+}
+.bj-badge b { font-weight: 800; }
+.bj-badge.win { background: rgba(4, 40, 24, .78); color: #d6ffeb; box-shadow: inset 0 0 0 1px rgba(20, 241, 149, .6); }
+.bj-badge.win em { font-style: normal; font-weight: 800; color: var(--win); white-space: nowrap; }
+.bj-table .result-pop span { white-space: nowrap; }
+.bj-table .result-pop small { margin-left: 2px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.bj-pays { display: grid; grid-template-columns: 1fr auto; gap: 3px 14px; margin-top: 6px; padding: 8px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: 13px; }
+.bj-pays b { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 
 .pcard { width: 84px; height: 118px; flex: none; perspective: 700px; animation: g-dealIn .4s cubic-bezier(.2, .8, .2, 1) both; }
 .pcard + .pcard { margin-left: -32px; }
@@ -564,6 +587,8 @@ body.theatre .livecard { left: 16px; }
   .rl-wheelbox { transform: scale(.86); margin: -22px 0; }
   .bj-table { min-height: 470px; padding: 22px 10px 44px; border-width: 7px; }
   .bj-shoe { display: none; }
+  .bj-table .result-pop { top: 178px; padding: 11px 20px; }
+  .bj-table .result-pop b { font-size: 26px; }
   .pcard { width: 68px; height: 96px; }
   .pcard + .pcard { margin-left: -28px; }
   .pc-big { font-size: 36px; }

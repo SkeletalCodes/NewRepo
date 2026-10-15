@@ -151,7 +151,7 @@ router.post('/:game/bet', betLimiter, async (req, res) => {
   const l = await limits();
   if (!l.enabled && req.user.role !== 'admin') return bad(res, 'Games are switched off right now.', 503);
   let params;
-  try { params = g.check(req.body.params || {}); } catch (err) { return bad(res, err instanceof GameError ? err.message : 'Invalid bet.'); }
+  try { params = g.check(req.body.params || {}, { amount: Math.floor(Number(req.body.amount)), min: l.min }); } catch (err) { return bad(res, err instanceof GameError ? err.message : 'Invalid bet.'); }
   const amount = g.stake ? g.stake(params) : Math.floor(Number(req.body.amount));
   if (!Number.isFinite(amount) || amount < l.min) return bad(res, `The minimum bet is ${money(l.min)}.`);
   if (amount > l.max) return bad(res, `The maximum bet is ${money(l.max)}.`);
@@ -211,15 +211,16 @@ async function runAction(userId, id, action, params) {
       return await db.tx(async (t) => {
         let amount = b.amount;
         if (b.game === 'blackjack' && action === 'double') {
-          if (!(await debit(t, userId, b.amount, 'bet', 'Blackjack double'))) throw new GameError('Not enough balance to double.');
-          amount = b.amount * 2;
+          const main = state.main || b.amount; // only the main bet doubles, never the side bets
+          if (!(await debit(t, userId, main, 'bet', 'Blackjack double'))) throw new GameError('Not enough balance to double.');
+          amount = b.amount + main;
         }
         const res = g.act(makeRng(), state, action, params);
         const upd = await t.run('UPDATE bets SET state = ?, amount = ?, version = version + 1 WHERE id = ? AND version = ? AND status = ?',
           JSON.stringify(res.state), amount, b.id, b.version, 'active');
         if (upd.changes !== 1) throw new Retry();
         if (!res.done) return { bet: await t.get('SELECT * FROM bets WHERE id = ?', b.id) };
-        const paid = await settle(t, { ...b, amount }, res.mult);
+        const paid = await settle(t, { ...b, amount }, res.mult, res.payoutCents);
         return { bet: await t.get("UPDATE bets SET status = 'settled', payout = ?, multiplier = ?, settled_at = ? WHERE id = ? RETURNING *", paid.payout, paid.mult, Date.now(), b.id) };
       });
     } catch (err) {

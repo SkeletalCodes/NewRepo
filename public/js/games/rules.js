@@ -1,8 +1,19 @@
 /* How-to-play text for the info button under each game (from the original site). `max` is the best single-bet payout. */
 window.GG.rules = {
   blackjack: {
-    how: ['Get closer to 21 than the dealer without going over.', 'Hit to take a card, Stand to stop, Double to double your bet for exactly one more card.', 'Face cards count 10, an ace counts 1 or 11. The dealer stands on 17.', 'A two-card 21 (blackjack) pays 3 to 2. A tie returns your bet.'],
-    max: '2.50×', risk: 'Low. The edge is small and you control every decision.',
+    how: ['Get closer to 21 than the dealer without going over.', 'Hit to take a card, Stand to stop, Double to double your bet for exactly one more card.', 'Face cards count 10, an ace counts 1 or 11. The dealer stands on 17.', 'A two-card 21 (blackjack) pays 3 to 2. A tie returns your bet.',
+      'Side bets are optional. Each one is either nothing or between the minimum bet and your main bet, and the maximum bet covers the main bet and side bets together. They are decided by the first cards, shown straight away and paid when the hand ends, whatever happens to it. Doubling only doubles the main bet.',
+      `<b>Perfect Pairs</b> uses your first two cards. Returns 98.08%.<span class="bj-pays">
+        <span>Perfect pair: same rank and suit</span><b>25 to 1</b>
+        <span>Coloured pair: same rank and colour</span><b>12 to 1</b>
+        <span>Mixed pair: same rank, red and black</span><b>5 to 1</b></span>`,
+      `<b>21+3</b> makes a three-card poker hand from your first two cards and the dealer's face-up card. Only the best line pays. An ace is high or low (Q-K-A or A-2-3, never K-A-2). Returns 99.18%.<span class="bj-pays">
+        <span>Suited three of a kind</span><b>100 to 1</b>
+        <span>Straight flush</span><b>40 to 1</b>
+        <span>Three of a kind</span><b>30 to 1</b>
+        <span>Straight</span><b>10 to 1</b>
+        <span>Flush</span><b>5 to 1</b></span>`],
+    max: '2.50×', risk: 'Low. The edge is small and you control every decision. The side bets win less often and pay more: Perfect Pairs lands about 1 hand in 13, 21+3 about 1 in 10.',
   },
   baccarat: {
     how: ['Bet on Player, Banker or Tie before the cards are dealt.', 'Two cards each; tens and faces count zero and only the last digit of the total matters. Closest to 9 wins.', 'A third card is drawn by fixed rules — you make no decisions after betting.', 'Player pays 1 to 1, Banker pays 0.95 to 1, Tie pays 8 to 1. A tie returns Player and Banker bets.'],
