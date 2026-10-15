@@ -172,7 +172,6 @@
       panel.appendChild(h(`<div>
         <button class="gbtn primary lg block" id="vp-btn">Deal</button>
         <button class="gbtn ghost block" id="vp-clear" style="margin-top:10px">Clear holds</button>
-        <p class="panel-note">Jacks or Better. Deal five cards, tap the ones you want to keep, then draw. A pair of jacks or better gives your bet back; a royal flush pays 800×.</p>
       </div>`));
       stage.appendChild(h(`<div class="vp-wrap">
         <div class="vp-pay" id="vp-pay"></div>

@@ -906,6 +906,43 @@
   const skels = (n, h = 150) => `<div class="skel" style="min-height:${h}px"></div>`.repeat(n);
   const emptyHTML = (msg, ic = 'fa-magnifying-glass') => `<div class="empty"><i class="fa-solid ${ic}"></i>${esc(msg)}</div>`;
 
+  /* ============================================================== paging */
+
+  /** Previous / next buttons under a list. Lists are newest first, so "Newer" goes back a page. */
+  function pagerBar(p, hasMore) {
+    if (p === 1 && !hasMore) return '';
+    return `<div class="pager">
+      <button class="btn btn-sm" data-pg="${p - 1}" ${p > 1 ? '' : 'disabled'}><i class="fa-solid fa-chevron-left"></i> Newer</button>
+      <span class="pager-at">Page ${p}</span>
+      <button class="btn btn-sm" data-pg="${p + 1}" ${hasMore ? '' : 'disabled'}>Older <i class="fa-solid fa-chevron-right"></i></button></div>`;
+  }
+
+  /** Wire the buttons pagerBar() drew inside `root`: `go(n)` loads page n. */
+  function bindPager(go, root = document) {
+    root.querySelectorAll('[data-pg]').forEach((b) => b.addEventListener('click', () => { if (!b.disabled) go(Number(b.dataset.pg)); }));
+  }
+
+  /**
+   * A list that loads one page at a time into `el`. `url` has no page in it, `key` names the array in
+   * the response and `render(rows)` draws it. Returns `{ reload }`, which refetches the page on screen.
+   */
+  function pagedList(el, url, key, render, empty) {
+    let page = 1;
+    const show = async (p) => {
+      page = p;
+      el.innerHTML = skels(1, 120);
+      try {
+        const res = await api(`${url}${url.includes('?') ? '&' : '?'}page=${p}`);
+        if (!el.isConnected) return;
+        const rows = res[key] || [];
+        el.innerHTML = (rows.length ? render(rows) : empty) + pagerBar(p, res.hasMore);
+        bindPager(show, el);
+      } catch (err) { if (el.isConnected) toast(err.message, 'error'); }
+    };
+    show(1);
+    return { reload: () => show(page) };
+  }
+
   function noWallsHTML() {
     const admin = state.user && state.user.role === 'admin';
     return `<div class="empty"><i class="fa-solid fa-layer-group"></i>${admin
@@ -1066,14 +1103,13 @@
     } catch (err) { toast(err.message, 'error'); }
   }
 
-  async function loadMyWithdrawals() {
-    const { withdrawals } = await api('/me/history');
+  function loadMyWithdrawals() {
     const el = $('#my-wd');
     if (!el) return;
-    el.innerHTML = withdrawals.length ? `<div class="table-wrap"><table><thead><tr><th>Method</th><th>Amount</th><th>Sent to</th><th>Status</th><th>Date</th></tr></thead><tbody>
-      ${withdrawals.map((w) => `<tr><td><b>${esc(w.method_name)}</b></td><td class="money">${money(w.coins)}</td><td class="mono faint" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(w.destination)}</td>
+    pagedList(el, '/me/history?section=withdrawals', 'items', (rows) => `<div class="table-wrap"><table><thead><tr><th>Method</th><th>Amount</th><th>Sent to</th><th>Status</th><th>Date</th></tr></thead><tbody>
+      ${rows.map((w) => `<tr><td><b>${esc(w.method_name)}</b></td><td class="money">${money(w.coins)}</td><td class="mono faint" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(w.destination)}</td>
         <td><span class="badge st-${esc(w.status)}">${esc(w.status)}</span>${w.admin_note ? `<div class="faint" style="font-size:12px">${esc(w.admin_note)}</div>` : ''}</td><td class="faint">${dateTime(w.created_at)}</td></tr>`).join('')}
-      </tbody></table></div>` : emptyHTML("You haven't cashed out yet.", 'fa-money-bill-wave');
+      </tbody></table></div>`, emptyHTML("You haven't cashed out yet.", 'fa-money-bill-wave'));
   }
 
   function openWithdraw(m) {
@@ -1148,7 +1184,7 @@
       const link = `${location.origin}/?ref=${r.code}`;
       setContent(`<div class="page-head"><div><h1>Referrals</h1><p>Get ${fmt(c.referral_percent)}% of every offer your friends complete. For good.</p></div></div>
         <div class="stat-grid">
-          <div class="press quiet stat" data-reveal><span class="si"><i class="fa-solid fa-user-group"></i></span><div><div class="sl">People you referred</div><div class="sv" data-count="${r.referrals.length}" data-fmt="n">0</div></div></div>
+          <div class="press quiet stat" data-reveal><span class="si"><i class="fa-solid fa-user-group"></i></span><div><div class="sl">People you referred</div><div class="sv" data-count="${r.count}" data-fmt="n">0</div></div></div>
           <div class="press quiet stat" data-reveal><span class="si"><i class="fa-solid fa-sack-dollar"></i></span><div><div class="sl">You've earned</div><div class="sv" data-count="${r.commission}">$0.00</div></div></div>
           <div class="press quiet stat" data-reveal><span class="si"><i class="fa-solid fa-percent"></i></span><div><div class="sl">Your cut</div><div class="sv">${fmt(c.referral_percent)}%</div></div></div>
         </div>
@@ -1158,9 +1194,10 @@
           <div class="copy-box"><input class="input" readonly value="${esc(link)}" id="ref-link"><button class="btn btn-gold" data-act="copy-ref"><i class="fa-solid fa-copy"></i> Copy</button></div>
         </div>
         <div class="sec-title"><i class="fa-solid fa-users"></i> Your referrals</div>
-        ${r.referrals.length ? `<div class="table-wrap"><table><thead><tr><th>User</th><th>Joined</th><th style="text-align:right">They earned</th><th style="text-align:right">Your cut</th></tr></thead><tbody>
-          ${r.referrals.map((x) => `<tr><td><b>${esc(x.username)}</b></td><td class="faint">${date(x.created_at)}</td><td style="text-align:right" class="money">${money(x.earned)}</td><td style="text-align:right" class="money green">${money(Math.floor((x.earned * c.referral_percent) / 100))}</td></tr>`).join('')}
-          </tbody></table></div>` : emptyHTML('No referrals yet. Send your link to a friend.', 'fa-user-plus')}`);
+        <div id="ref-list"></div>`);
+      pagedList($('#ref-list'), '/me/referrals', 'referrals', (rows) => `<div class="table-wrap"><table><thead><tr><th>User</th><th>Joined</th><th style="text-align:right">They earned</th><th style="text-align:right">Your cut</th></tr></thead><tbody>
+          ${rows.map((x) => `<tr><td><b>${esc(x.username)}</b></td><td class="faint">${date(x.created_at)}</td><td style="text-align:right" class="money">${money(x.earned)}</td><td style="text-align:right" class="money green">${money(Math.floor((x.earned * c.referral_percent) / 100))}</td></tr>`).join('')}
+          </tbody></table></div>`, emptyHTML('No referrals yet. Send your link to a friend.', 'fa-user-plus'));
     } catch (err) { toast(err.message, 'error'); }
   }
 
@@ -1253,26 +1290,22 @@
       loadSessions().catch((err) => toast(err.message, 'error'));
       return;
     }
-    try {
-      const h = await api('/me/history');
-      if (!out.isConnected) return;
-      if (tab === 'activity') {
-        out.innerHTML = h.transactions.length ? `<div class="table-wrap"><table><thead><tr><th>What</th><th>Type</th><th style="text-align:right">Amount</th><th>When</th></tr></thead><tbody>
-          ${h.transactions.map((t) => `<tr><td>${esc(t.description)}</td><td><span class="badge b-gray">${esc(t.type)}</span></td><td style="text-align:right" class="money ${t.amount >= 0 ? 'green' : 'red'}">${t.amount >= 0 ? '+' : '−'}${money(Math.abs(t.amount))}</td><td class="faint">${dateTime(t.created_at)}</td></tr>`).join('')}
-          </tbody></table></div>` : emptyHTML('Nothing here yet.');
-      } else if (tab === 'offers') {
-        out.innerHTML = h.completions.length ? `<div class="table-wrap"><table><thead><tr><th>Offer</th><th>From</th><th>Pays</th><th>Status</th><th>When</th></tr></thead><tbody>
-          ${h.completions.map((c) => `<tr><td><b>${esc(c.offer_title)}</b></td><td class="faint">${esc(c.provider)}</td><td class="money">${money(c.reward)}</td><td><span class="badge st-${esc(c.status)}">${c.status === 'pending' ? 'on hold' : esc(c.status)}</span>${c.status === 'pending' && c.release_at ? `<div class="faint" style="font-size:12px">until ${esc(dateTime(c.release_at))}</div>` : ''}</td><td class="faint">${dateTime(c.created_at)}</td></tr>`).join('')}
-          </tbody></table></div>` : emptyHTML("You haven't earned from any offerwalls yet.", 'fa-layer-group');
-      } else {
-        out.innerHTML = h.withdrawals.length ? `<div class="table-wrap"><table><thead><tr><th>Method</th><th>Amount</th><th>Sent to</th><th>Status</th><th>When</th></tr></thead><tbody>
-          ${h.withdrawals.map((w) => `<tr><td><b>${esc(w.method_name)}</b></td><td class="money">${money(w.coins)}</td><td class="mono faint">${esc(w.destination)}</td><td><span class="badge st-${esc(w.status)}">${esc(w.status)}</span></td><td class="faint">${dateTime(w.created_at)}</td></tr>`).join('')}
-          </tbody></table></div>` : emptyHTML('No cashouts yet.', 'fa-money-bill-wave');
-      }
-    } catch (err) { toast(err.message, 'error'); }
+    if (tab === 'activity') {
+      pagedList(out, '/me/history?section=transactions', 'items', (rows) => `<div class="table-wrap"><table><thead><tr><th>What</th><th>Type</th><th style="text-align:right">Amount</th><th>When</th></tr></thead><tbody>
+          ${rows.map((t) => `<tr><td>${esc(t.description)}</td><td><span class="badge b-gray">${esc(t.type)}</span></td><td style="text-align:right" class="money ${t.amount >= 0 ? 'green' : 'red'}">${t.amount >= 0 ? '+' : '−'}${money(Math.abs(t.amount))}</td><td class="faint">${dateTime(t.created_at)}</td></tr>`).join('')}
+          </tbody></table></div>`, emptyHTML('Nothing here yet.'));
+    } else if (tab === 'offers') {
+      pagedList(out, '/me/history?section=completions', 'items', (rows) => `<div class="table-wrap"><table><thead><tr><th>Offer</th><th>From</th><th>Pays</th><th>Status</th><th>When</th></tr></thead><tbody>
+          ${rows.map((c) => `<tr><td><b>${esc(c.offer_title)}</b></td><td class="faint">${esc(c.provider)}</td><td class="money">${money(c.reward)}</td><td><span class="badge st-${esc(c.status)}">${c.status === 'pending' ? 'on hold' : esc(c.status)}</span>${c.status === 'pending' && c.release_at ? `<div class="faint" style="font-size:12px">until ${esc(dateTime(c.release_at))}</div>` : ''}</td><td class="faint">${dateTime(c.created_at)}</td></tr>`).join('')}
+          </tbody></table></div>`, emptyHTML("You haven't earned from any offerwalls yet.", 'fa-layer-group'));
+    } else {
+      pagedList(out, '/me/history?section=withdrawals', 'items', (rows) => `<div class="table-wrap"><table><thead><tr><th>Method</th><th>Amount</th><th>Sent to</th><th>Status</th><th>When</th></tr></thead><tbody>
+          ${rows.map((w) => `<tr><td><b>${esc(w.method_name)}</b></td><td class="money">${money(w.coins)}</td><td class="mono faint">${esc(w.destination)}</td><td><span class="badge st-${esc(w.status)}">${esc(w.status)}</span></td><td class="faint">${dateTime(w.created_at)}</td></tr>`).join('')}
+          </tbody></table></div>`, emptyHTML('No cashouts yet.', 'fa-money-bill-wave'));
+    }
   }
 
-  /* ================================================================= admin */
+  /* ================================================================= admin */  /* ================================================================= admin */
 
   const adminPages = {
     '': adminOverview,
@@ -1332,9 +1365,9 @@
   async function adminUsers() {
     setContent(`${adminHead('Users', 'Search, adjust balances, ban and promote.')}
       <div class="toolbar"><div class="input-icon" style="width:min(100%,340px)"><i class="fa-solid fa-magnifying-glass"></i><input class="input" id="u-search" placeholder="Username, email or ID"></div></div><div id="u-table"></div>`);
-    const load = async () => {
+    const load = async (p = 1) => {
       if (!$('#u-search')) return; // left the page
-      const { users } = await api(`/admin/users?q=${encodeURIComponent($('#u-search').value)}`);
+      const { users, hasMore } = await api(`/admin/users?q=${encodeURIComponent($('#u-search').value)}&page=${p}`);
       if (!$('#u-table')) return;
       $('#u-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>ID</th><th>User</th><th>Balance</th><th>Earned</th><th>Refs</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>
         ${users.map((u) => `<tr><td class="faint">#${u.id}</td>
@@ -1343,7 +1376,8 @@
           <td>${u.banned ? '<span class="badge b-red">Banned</span>' : '<span class="badge b-green">Active</span>'}</td>
           <td class="faint">${date(u.created_at)}</td>
           <td><button class="btn btn-sm" data-user="${u.id}">Manage</button></td></tr>`).join('') || `<tr><td colspan="8">${emptyHTML('No users found.')}</td></tr>`}
-        </tbody></table></div>`;
+        </tbody></table></div>${pagerBar(p, hasMore)}`;
+      bindPager(load);
       $$('[data-user]').forEach((b) => b.addEventListener('click', () => manageUser(Number(b.dataset.user), load)));
     };
     let t;
@@ -1595,11 +1629,11 @@
     });
   }
 
-  async function adminLogs() {
+  async function adminLogs(page = 1) {
     const wallId = state.route[2] || '';
     const result = state.route[3] || '';
-    const [{ offerwalls }, { logs }] = await Promise.all([api('/admin/offerwalls'),
-      api(`/admin/postback-logs?wall=${encodeURIComponent(wallId)}&result=${encodeURIComponent(result)}`)]);
+    const [{ offerwalls }, { logs, hasMore }] = await Promise.all([api('/admin/offerwalls'),
+      api(`/admin/postback-logs?wall=${encodeURIComponent(wallId)}&result=${encodeURIComponent(result)}&page=${page}`)]);
     const RESULTS = ['credited', 'held', 'reversed', 'duplicate', 'ignored', 'rejected'];
     const badge = (r) => `<span class="badge ${['credited', 'held', 'reversed'].includes(r) ? 'b-green' : r === 'rejected' ? 'b-red' : 'b-gold'}">${esc(r)}</span>`;
     setContent(`${adminHead('Postback log', 'Every postback the networks send, and what happened to it. Kept for 30 days.')}
@@ -1613,7 +1647,8 @@
         <td>${l.username ? esc(l.username) : '<span class="faint">—</span>'}</td><td class="money ${l.amount < 0 ? 'red' : ''}">${l.amount === null || l.amount === undefined ? '' : money(l.amount)}</td>
         <td><div>${esc(l.message)}</div><details><summary class="faint" style="cursor:pointer;font-size:12px">${esc(l.method)} from ${esc(l.ip)}</summary><div class="code mt-8">${esc(l.params)}</div></details></td></tr>`).join('')
         || `<tr><td colspan="6">${emptyHTML('No postbacks yet. Use "Send test" on an offerwall, or send a test conversion from the network.', 'fa-tower-broadcast')}</td></tr>`}
-      </tbody></table></div>`);
+      </tbody></table></div>${pagerBar(page, hasMore)}`);
+    bindPager((n) => adminLogs(n));
     const nav = () => go(`admin/logs/${$('#lg-wall').value || '0'}/${$('#lg-res').value}`.replace(/\/$/, ''));
     $('#lg-wall').addEventListener('change', nav);
     $('#lg-res').addEventListener('change', nav);
@@ -1624,28 +1659,29 @@
     return `<div class="tabs" style="margin-bottom:18px">${list.map(([k, l]) => `<a href="#/admin/${base}${k ? `/${k}` : ''}" class="tab ${current === k ? 'active' : ''}">${l}</a>`).join('')}</div>`;
   }
 
-  async function adminCompletions() {
+  async function adminCompletions(page = 1) {
     const status = state.route[2] || 'pending';
-    const { completions } = await api(`/admin/completions?status=${status === 'all' ? '' : status}`);
+    const { completions, hasMore } = await api(`/admin/completions?status=${status === 'all' ? '' : status}&page=${page}`);
     setContent(`${adminHead('Conversions', 'Every reward the networks have reported. Pending ones are on hold: release them early or reject them. Reversing a paid one takes the money back.')}
       ${statusTabs('completions', status, [['pending', 'Pending'], ['completed', 'Completed'], ['rejected', 'Rejected'], ['all', 'All']])}
       <div class="table-wrap"><table><thead><tr><th>ID</th><th>User</th><th>Offer</th><th>Pays</th><th>Status</th><th>When</th><th></th></tr></thead><tbody>
       ${completions.map((c) => `<tr><td class="faint">#${c.id}</td><td><b>${esc(c.username)}</b></td><td>${esc(c.offer_title)}<div class="faint" style="font-size:12px">${esc(c.provider)}${c.txid ? ` · tx ${esc(c.txid)}` : ''}</div></td>
         <td class="money">${money(c.reward)}</td><td><span class="badge st-${esc(c.status)}">${esc(c.status)}</span></td><td class="faint">${dateTime(c.created_at)}</td>
         <td><div class="row" style="gap:6px">${c.status === 'pending' ? `<button class="btn btn-sm btn-green" data-ok="${c.id}" title="${c.release_at ? `Releases on its own ${esc(dateTime(c.release_at))}` : ''}">Release now</button>` : ''}${c.status !== 'rejected' ? `<button class="btn btn-sm btn-danger" data-no="${c.id}">${c.status === 'completed' ? 'Reverse' : 'Reject'}</button>` : ''}</div></td></tr>`).join('') || `<tr><td colspan="7">${emptyHTML('Nothing here.', 'fa-circle-check')}</td></tr>`}
-      </tbody></table></div>`);
+      </tbody></table></div>${pagerBar(page, hasMore)}`);
+    bindPager((n) => adminCompletions(n));
     $$('[data-ok]').forEach((b) => b.addEventListener('click', async () => {
-      try { await api(`/admin/completions/${b.dataset.ok}/approve`, { body: {} }); toast('Approved and paid.', 'success'); adminCompletions(); } catch (err) { toast(err.message, 'error'); }
+      try { await api(`/admin/completions/${b.dataset.ok}/approve`, { body: {} }); toast('Approved and paid.', 'success'); adminCompletions(page); } catch (err) { toast(err.message, 'error'); }
     }));
     $$('[data-no]').forEach((b) => b.addEventListener('click', async () => {
       if (!(await confirmModal('Reject this?', 'If it was already paid, the money is taken back from the user.', 'Reject', true))) return;
-      try { await api(`/admin/completions/${b.dataset.no}/reject`, { body: {} }); toast('Rejected.', 'success'); adminCompletions(); } catch (err) { toast(err.message, 'error'); }
+      try { await api(`/admin/completions/${b.dataset.no}/reject`, { body: {} }); toast('Rejected.', 'success'); adminCompletions(page); } catch (err) { toast(err.message, 'error'); }
     }));
   }
 
-  async function adminWithdrawals() {
+  async function adminWithdrawals(page = 1) {
     const status = state.route[2] || 'pending';
-    const { withdrawals } = await api(`/admin/withdrawals?status=${status === 'all' ? '' : status}`);
+    const { withdrawals, hasMore } = await api(`/admin/withdrawals?status=${status === 'all' ? '' : status}&page=${page}`);
     setContent(`${adminHead('Cashouts', 'Send the payment yourself, then mark it paid. Rejecting refunds the user.')}
       ${statusTabs('withdrawals', status, [['pending', 'Pending'], ['paid', 'Paid'], ['rejected', 'Rejected'], ['all', 'All']])}
       <div class="table-wrap"><table><thead><tr><th>ID</th><th>User</th><th>Method</th><th>Amount</th><th>Send to</th><th>Status</th><th>When</th><th></th></tr></thead><tbody>
@@ -1653,7 +1689,8 @@
         <td class="money">${money(w.coins)}</td><td><span class="code inline" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${esc(w.destination)}</span> <button class="icon-btn" style="width:30px;height:30px;display:inline-grid;vertical-align:middle" data-copy="${esc(w.destination)}" aria-label="Copy"><i class="fa-solid fa-copy" style="font-size:12px"></i></button></td>
         <td><span class="badge st-${esc(w.status)}">${esc(w.status)}</span>${w.admin_note ? `<div class="faint" style="font-size:12px">${esc(w.admin_note)}</div>` : ''}</td><td class="faint">${dateTime(w.created_at)}</td>
         <td>${w.status === 'pending' ? `<div class="row" style="gap:6px"><button class="btn btn-sm btn-green" data-pay="${w.id}">Mark paid</button><button class="btn btn-sm btn-danger" data-rej="${w.id}">Reject</button></div>` : ''}</td></tr>`).join('') || `<tr><td colspan="8">${emptyHTML('Nothing here.', 'fa-money-bill-transfer')}</td></tr>`}
-      </tbody></table></div>`);
+      </tbody></table></div>${pagerBar(page, hasMore)}`);
+    bindPager((n) => adminWithdrawals(n));
     $$('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied.', 'success'); } catch { toast("Couldn't copy.", 'error'); }
     }));
@@ -1663,7 +1700,7 @@
         <button class="btn ${action === 'pay' ? 'btn-gold' : 'btn-danger'} btn-block">${action === 'pay' ? 'Mark paid' : 'Reject and refund'}</button></form></div>`);
       $('#wa-f').addEventListener('submit', async (e) => {
         e.preventDefault();
-        try { await api(`/admin/withdrawals/${id}/${action}`, { body: formData(e.target) }); closeModal(); toast('Cashout updated.', 'success'); adminWithdrawals(); } catch (err) { toast(err.message, 'error'); }
+        try { await api(`/admin/withdrawals/${id}/${action}`, { body: formData(e.target) }); closeModal(); toast('Cashout updated.', 'success'); adminWithdrawals(page); } catch (err) { toast(err.message, 'error'); }
       });
     };
     $$('[data-pay]').forEach((b) => b.addEventListener('click', () => act(b.dataset.pay, 'pay')));
@@ -1740,8 +1777,8 @@
     }));
   }
 
-  async function adminGames() {
-    const d = await api('/admin/games');
+  async function adminGames(page = 1) {
+    const d = await api(`/admin/games?page=${page}`);
     const box = (label, x) => `<div class="press quiet stat" data-reveal><span class="si"><i class="fa-solid fa-dice"></i></span><div><div class="sl">${label}</div>
       <div class="sv ${x.wagered - x.paid >= 0 ? '' : 'red'}">${money(x.wagered - x.paid)}</div><div class="faint" style="font-size:12px;font-weight:600">${fmt(x.bets)} bets · ${money(x.wagered)} wagered</div></div></div>`;
     setContent(`${adminHead('Games', 'House profit is what players wagered minus what was paid back. Limits and the on/off switch are in Settings.')}
@@ -1756,26 +1793,29 @@
       <div class="table-wrap"><table><thead><tr><th>When</th><th>Player</th><th>Game</th><th>Bet</th><th>Multiplier</th><th style="text-align:right">Payout</th></tr></thead><tbody>
         ${d.bets.map((b) => `<tr><td class="faint nowrap">${dateTime(b.created_at)}</td><td><b>${esc(b.username)}</b></td><td>${esc(b.name)} ${b.status === 'active' ? '<span class="badge b-gold">open</span>' : ''}</td>
           <td class="money">${money(b.amount)}</td><td>${Number(b.multiplier).toFixed(2)}×</td><td style="text-align:right" class="money ${b.payout > b.amount ? 'green' : ''}">${money(b.payout)}</td></tr>`).join('')
-        || `<tr><td colspan="6">${emptyHTML('No bets yet.', 'fa-dice')}</td></tr>`}</tbody></table></div>`);
+        || `<tr><td colspan="6">${emptyHTML('No bets yet.', 'fa-dice')}</td></tr>`}</tbody></table></div>${pagerBar(page, d.hasMore)}`);
+    bindPager((n) => adminGames(n));
   }
 
-  async function adminAudit() {
-    const { entries } = await api('/admin/audit');
+  async function adminAudit(page = 1) {
+    const { entries, hasMore } = await api(`/admin/audit?page=${page}`);
     setContent(`${adminHead('Audit log', 'Every change made in the admin panel, and who made it.')}
       <div class="table-wrap"><table><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th><th>IP</th></tr></thead><tbody>
       ${entries.map((e) => `<tr><td class="faint nowrap">${dateTime(e.created_at)}</td><td><b>${esc(e.admin_name || 'deleted')}</b></td><td>${esc(e.action)}<div class="faint mono" style="font-size:11px">${esc(e.target)}</div></td>
         <td><details><summary class="faint" style="cursor:pointer;font-size:12px">View</summary><div class="code mt-8">${esc(e.details)}</div></details></td><td class="faint mono" style="font-size:12px">${esc(e.ip)}</td></tr>`).join('')
         || `<tr><td colspan="5">${emptyHTML('No admin actions yet.', 'fa-clipboard-list')}</td></tr>`}
-      </tbody></table></div>`);
+      </tbody></table></div>${pagerBar(page, hasMore)}`);
+    bindPager((n) => adminAudit(n));
   }
 
-  async function adminTransactions() {
-    const { transactions } = await api('/admin/transactions');
-    setContent(`${adminHead('Transactions', 'The latest 300 balance changes.')}
+  async function adminTransactions(page = 1) {
+    const { transactions, hasMore } = await api(`/admin/transactions?page=${page}`);
+    setContent(`${adminHead('Transactions', 'Every balance change, newest first.')}
       <div class="table-wrap"><table><thead><tr><th>ID</th><th>User</th><th>Type</th><th>What</th><th style="text-align:right">Amount</th><th>When</th></tr></thead><tbody>
       ${transactions.map((t) => `<tr><td class="faint">#${t.id}</td><td><b>${esc(t.username)}</b></td><td><span class="badge b-gray">${esc(t.type)}</span></td><td>${esc(t.description)}</td>
         <td style="text-align:right" class="money ${t.amount >= 0 ? 'green' : 'red'}">${t.amount >= 0 ? '+' : '−'}${money(Math.abs(t.amount))}</td><td class="faint">${dateTime(t.created_at)}</td></tr>`).join('') || `<tr><td colspan="6">${emptyHTML('No transactions yet.')}</td></tr>`}
-      </tbody></table></div>`);
+      </tbody></table></div>${pagerBar(page, hasMore)}`);
+    bindPager((n) => adminTransactions(n));
   }
 
   async function adminSettings() {
@@ -1829,7 +1869,7 @@
   window.GR = {
     $, $$, esc, fmt, money, moneyShort, toCents, api, toast, coin, avatar, dateTime, emptyHTML, skels,
     page, setContent, openModal, closeModal, confirmModal, openAuth, reveal, afterRender, countTo,
-    setUser, showBalance, creditFx, flyCoins, coinRain, go, state, reduced,
+    setUser, showBalance, creditFx, flyCoins, coinRain, go, state, reduced, pagedList, pagerBar, bindPager,
   };
 
   /* ================================================================== boot */

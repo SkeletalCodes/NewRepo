@@ -169,7 +169,6 @@
         <div class="gfield"><span class="gfield-l">Chance the next pump is safe</span><div class="readout" id="pm-chance">—</div></div>
         <button class="gbtn primary lg block" id="pm-btn">Bet</button>
         <button class="gbtn green lg block" id="pm-cash" style="margin-top:10px" hidden>Cash out</button>
-        <p class="panel-note">Easy rigs 1 pump in 25, Medium 3, Hard 5 and Expert 10. The balloon turns from green to red as the odds of having survived this long shrink.</p>
       </div>`));
       stage.appendChild(h(`<div class="pm-wrap">
         <div class="pm-arena">

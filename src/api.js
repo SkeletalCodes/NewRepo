@@ -9,6 +9,7 @@ const {
   createResetToken, findResetToken, consumeResetToken,
 } = require('./auth');
 const { mailConfigured, sendMail, layout } = require('./mail');
+const { pageOf, pageRows } = require('./paging');
 
 const router = express.Router();
 
@@ -360,22 +361,23 @@ router.post('/withdraw', requireUser, actionLimiter, async (req, res) => {
 
 /* ---------------------------------------------------------------- history */
 
+/* One section of the activity list, a page at a time: ?section=transactions|completions|withdrawals&page=1 */
 router.get('/me/history', requireUser, async (req, res) => {
-  const id = req.user.id;
-  const [transactions, completions, withdrawals] = await Promise.all([
-    db.all('SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 100', id),
-    db.all('SELECT * FROM offer_completions WHERE user_id = ? ORDER BY id DESC LIMIT 100', id),
-    db.all('SELECT * FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 100', id),
-  ]);
-  res.json({ transactions, completions, withdrawals });
+  const section = ['transactions', 'completions', 'withdrawals'].includes(req.query.section) ? req.query.section : 'transactions';
+  const table = { transactions: 'transactions', completions: 'offer_completions', withdrawals: 'withdrawals' }[section];
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT * FROM ${table} WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, req.user.id, p.limit + 1, p.offset);
+  res.json({ section, ...pageRows(rows, p) });
 });
 
 router.get('/me/referrals', requireUser, async (req, res) => {
-  const referrals = await db.all(`SELECT u.username, u.created_at,
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT u.username, u.created_at,
       COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.user_id = u.id AND t.type = 'offer'), 0) AS earned
-    FROM users u WHERE u.referred_by = ? ORDER BY u.id DESC LIMIT 200`, req.user.id);
+    FROM users u WHERE u.referred_by = ? ORDER BY u.id DESC LIMIT ? OFFSET ?`, req.user.id, p.limit + 1, p.offset);
+  const count = Number((await db.get('SELECT COUNT(*) AS n FROM users WHERE referred_by = ?', req.user.id)).n);
   const commission = (await db.get("SELECT COALESCE(SUM(amount), 0) AS n FROM transactions WHERE user_id = ? AND type = 'referral'", req.user.id)).n;
-  res.json({ referrals, commission, code: req.user.referral_code });
+  res.json({ ...pageRows(rows, p, 'referrals'), count, commission, code: req.user.referral_code });
 });
 
 /* ---------------------------------------------------------- social proof */
@@ -392,7 +394,7 @@ router.get('/leaderboard', async (req, res) => {
   const rows = await db.all(`SELECT u.username, u.avatar_color, SUM(t.amount) AS earned
     FROM transactions t JOIN users u ON u.id = t.user_id
     WHERE t.amount > 0 AND t.type IN ('offer','referral') AND t.created_at > ? AND u.banned = 0
-    GROUP BY u.id, u.username, u.avatar_color ORDER BY earned DESC LIMIT 25`, Date.now() - period * DAY_MS);
+    GROUP BY u.id, u.username, u.avatar_color ORDER BY earned DESC LIMIT 10`, Date.now() - period * DAY_MS);
   res.json({ leaderboard: rows });
 });
 

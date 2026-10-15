@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { db, credit, getSettings, setSetting } = require('./db');
+const { pageOf, pageRows } = require('./paging');
 const { requireAdmin, hashPassword, passwordProblem, destroyOtherSessions, createResetToken, RESET_TTL_MS } = require('./auth');
 const { approveCompletion, rejectCompletion } = require('./rewards');
 const { PRESETS, SIG_METHODS, newToken, processPostback, buildTestPostback } = require('./offerwalls');
@@ -59,18 +60,19 @@ router.get('/games', async (req, res) => {
   const byGame = await db.all(`SELECT game, COUNT(*) AS bets, COALESCE(SUM(amount), 0) AS wagered, COALESCE(SUM(payout), 0) AS paid
     FROM bets WHERE status = 'settled' GROUP BY game ORDER BY wagered DESC`);
   const user = int(req.query.user);
-  const bets = await db.all(`SELECT b.id, b.game, b.amount, b.payout, b.multiplier, b.status, b.nonce, b.created_at, b.settled_at, u.username
-    FROM bets b JOIN users u ON u.id = b.user_id ${user ? 'WHERE b.user_id = ?' : ''} ORDER BY b.id DESC LIMIT 200`, ...(user ? [user] : []));
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT b.id, b.game, b.amount, b.payout, b.multiplier, b.status, b.nonce, b.created_at, b.settled_at, u.username
+    FROM bets b JOIN users u ON u.id = b.user_id ${user ? 'WHERE b.user_id = ?' : ''} ORDER BY b.id DESC LIMIT ? OFFSET ?`, ...(user ? [user] : []), p.limit + 1, p.offset);
   const open = await db.get("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS amount FROM bets WHERE status = 'active'");
   const named = (r) => ({ ...r, name: GAMES[r.game] ? GAMES[r.game].name : r.game });
-  res.json({ today, week, all, byGame: byGame.map(named), bets: bets.map(named), open });
+  res.json({ today, week, all, byGame: byGame.map(named), ...pageRows(rows.map(named), p, 'bets'), open });
 });
 
-router.get('/audit', async (_req, res) => {
-  res.json({
-    entries: await db.all(`SELECT a.*, u.username AS admin_name FROM audit_log a LEFT JOIN users u ON u.id = a.admin_id
-      ORDER BY a.id DESC LIMIT 300`),
-  });
+router.get('/audit', async (req, res) => {
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT a.*, u.username AS admin_name FROM audit_log a LEFT JOIN users u ON u.id = a.admin_id
+    ORDER BY a.id DESC LIMIT ? OFFSET ?`, p.limit + 1, p.offset);
+  res.json(pageRows(rows, p, 'entries'));
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -123,13 +125,14 @@ router.get('/overview', async (_req, res) => {
 router.get('/users', async (req, res) => {
   const raw = str(req.query.q, 100);
   const q = `%${raw.toLowerCase()}%`;
-  const users = await db.all(`SELECT u.id, u.username, u.email, u.balance, u.total_earned, u.role, u.banned, u.is_demo,
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT u.id, u.username, u.email, u.balance, u.total_earned, u.role, u.banned, u.is_demo,
       u.referral_code, u.created_at, u.last_login_at, r.username AS referred_by_name,
       (SELECT COUNT(*) FROM users x WHERE x.referred_by = u.id) AS referrals
     FROM users u LEFT JOIN users r ON r.id = u.referred_by
     WHERE lower(u.username) LIKE ? OR lower(u.email) LIKE ? OR CAST(u.id AS TEXT) = ?
-    ORDER BY u.id DESC LIMIT 200`, q, q, raw);
-  res.json({ users });
+    ORDER BY u.id DESC LIMIT ? OFFSET ?`, q, q, raw, p.limit + 1, p.offset);
+  res.json(pageRows(rows, p, 'users'));
 });
 
 router.get('/users/:id', async (req, res) => {
@@ -326,21 +329,21 @@ router.get('/postback-logs', async (req, res) => {
   const params = [];
   if (wallId) { where.push('l.offerwall_id = ?'); params.push(wallId); }
   if (result) { where.push('l.result = ?'); params.push(result); }
-  res.json({
-    logs: await db.all(`SELECT l.*, w.name AS wall_name, u.username FROM postback_logs l
-      LEFT JOIN offerwalls w ON w.id = l.offerwall_id LEFT JOIN users u ON u.id = l.user_id
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY l.id DESC LIMIT 300`, ...params),
-  });
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT l.*, w.name AS wall_name, u.username FROM postback_logs l
+    LEFT JOIN offerwalls w ON w.id = l.offerwall_id LEFT JOIN users u ON u.id = l.user_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY l.id DESC LIMIT ? OFFSET ?`, ...params, p.limit + 1, p.offset);
+  res.json(pageRows(rows, p, 'logs'));
 });
 
 /* ------------------------------------------------------------ completions */
 
 router.get('/completions', async (req, res) => {
   const status = ['pending', 'completed', 'rejected'].includes(req.query.status) ? req.query.status : null;
-  res.json({
-    completions: await db.all(`SELECT c.*, u.username FROM offer_completions c JOIN users u ON u.id = c.user_id
-      ${status ? 'WHERE c.status = ?' : ''} ORDER BY c.id DESC LIMIT 300`, ...(status ? [status] : [])),
-  });
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT c.*, u.username FROM offer_completions c JOIN users u ON u.id = c.user_id
+    ${status ? 'WHERE c.status = ?' : ''} ORDER BY c.id DESC LIMIT ? OFFSET ?`, ...(status ? [status] : []), p.limit + 1, p.offset);
+  res.json(pageRows(rows, p, 'completions'));
 });
 
 router.post('/completions/:id/approve', async (req, res) => {
@@ -355,10 +358,10 @@ router.post('/completions/:id/reject', async (req, res) => {
 
 router.get('/withdrawals', async (req, res) => {
   const status = ['pending', 'paid', 'rejected'].includes(req.query.status) ? req.query.status : null;
-  res.json({
-    withdrawals: await db.all(`SELECT w.*, u.username, u.email FROM withdrawals w JOIN users u ON u.id = w.user_id
-      ${status ? 'WHERE w.status = ?' : ''} ORDER BY w.id DESC LIMIT 300`, ...(status ? [status] : [])),
-  });
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT w.*, u.username, u.email FROM withdrawals w JOIN users u ON u.id = w.user_id
+    ${status ? 'WHERE w.status = ?' : ''} ORDER BY w.id DESC LIMIT ? OFFSET ?`, ...(status ? [status] : []), p.limit + 1, p.offset);
+  res.json(pageRows(rows, p, 'withdrawals'));
 });
 
 router.post('/withdrawals/:id/:action', async (req, res) => {
@@ -448,11 +451,11 @@ router.delete('/promos/:code', async (req, res) => {
 
 /* ---------------------------------------------------------- transactions */
 
-router.get('/transactions', async (_req, res) => {
-  res.json({
-    transactions: await db.all(`SELECT t.*, u.username FROM transactions t JOIN users u ON u.id = t.user_id
-      ORDER BY t.id DESC LIMIT 300`),
-  });
+router.get('/transactions', async (req, res) => {
+  const p = pageOf(req.query);
+  const rows = await db.all(`SELECT t.*, u.username FROM transactions t JOIN users u ON u.id = t.user_id
+    ORDER BY t.id DESC LIMIT ? OFFSET ?`, p.limit + 1, p.offset);
+  res.json(pageRows(rows, p, 'transactions'));
 });
 
 /* -------------------------------------------------------------- settings */

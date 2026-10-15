@@ -201,7 +201,6 @@
         </div>
         <button class="gbtn primary lg block" id="mn-btn">Bet</button>
         <button class="gbtn ghost block" id="mn-rand" style="margin-top:10px" hidden>Pick random tile</button>
-        <p class="panel-note">Tap tiles one at a time, or <b>hold and drag</b> across the grid to reveal a run of them fast. Cash out any time after your first gem.</p>
       </div>`));
       let tiles = '';
       for (let i = 0; i < N; i++) tiles += `<button class="mn-tile" data-i="${i}" aria-label="Tile ${i + 1}"></button>`;

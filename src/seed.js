@@ -109,12 +109,29 @@ async function upgradeV3(t) {
 }
 
 /** Run pending one-time upgrades, each exactly once even with concurrent cold starts. */
+/*
+ * One-time fresh start after the testing phase: every balance, every bet, every earning and withdrawal
+ * is cleared. Accounts (usernames, emails, passwords, sessions), admins, offerwall setup, payout methods
+ * and site settings are kept.
+ */
+async function resetActivity(t) {
+  for (const table of ['transactions', 'offer_completions', 'withdrawals', 'promo_redemptions', 'postback_logs',
+    'bets', 'rounds', 'fair_seeds', 'password_resets', 'rate_limits']) {
+    await t.run(`DELETE FROM ${table}`);
+  }
+  await t.run('UPDATE promo_codes SET uses = 0');
+  await t.run('UPDATE users SET balance = 0, total_earned = 0, last_daily_at = NULL, failed_logins = 0, locked_until = NULL');
+}
+
 async function upgrade() {
   await db.tx(async (t) => {
     if (await claim(t, 'upgraded_v2')) await upgradeV2(t);
   });
   await db.tx(async (t) => {
     if (await claim(t, 'upgraded_v3')) await upgradeV3(t);
+  });
+  await db.tx(async (t) => {
+    if (await claim(t, 'reset_v5')) await resetActivity(t);
   });
 }
 

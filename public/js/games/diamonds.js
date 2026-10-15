@@ -100,7 +100,6 @@
       panel.appendChild(h(`<div>
         <div class="gfield"><span class="gfield-l">Risk</span>${GG.ui.seg('dm-risk', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], risk)}</div>
         <button class="gbtn primary lg block" id="dm-bet">Bet</button>
-        <p class="panel-note">Low risk pays back on a single pair. High risk pays nothing for a pair but far more for the rare hands.</p>
       </div>`));
       stage.appendChild(h(`<div class="dm-wrap">
         <div class="dm-row5">${'<div class="dm-slot"></div>'.repeat(5)}</div>

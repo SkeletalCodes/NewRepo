@@ -9,6 +9,8 @@ const assert = require('node:assert/strict');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'goldrush-'));
 if (!process.env.DATABASE_URL) process.env.DB_PATH = path.join(dir, 'test.db');
 process.env.RATE_LIMIT_SCALE = '20'; // every test request comes from one IP
+process.env.ROUND_BET_MS = '1200'; // timed rounds: short betting window and spin for the tests
+process.env.ROUND_SPIN_MS = '700';
 const app = require('../server');
 
 const server = app.listen(0);
@@ -247,7 +249,7 @@ async function postback(url, opts) {
   r = await user('/health');
   assert.equal(r.data.ok, true);
 
-  /* ---------- games (real balance, server-side provably fair) ---------- */
+  /* ---------- games (real balance, server-decided results) ---------- */
   {
     const g = client();
     await g('/auth/register', { username: 'gamer', email: 'gamer@example.com', password: 'gamerpass123', terms: true });
@@ -257,19 +259,18 @@ async function postback(url, opts) {
     assert.equal(bal, 10025);
 
     const cfg = (await g('/games/config')).data;
-    assert.equal(cfg.games.length, 20, '20 games, no slots');
+    assert.equal(cfg.games.length, 19, '19 games, no slots, no chicken');
+    assert.ok(!cfg.games.some((x) => x.id === 'chicken'));
     assert.ok(!cfg.games.some((x) => /slot/i.test(x.id)));
 
-    const fair = (await g('/games/fair')).data;
-    assert.ok(fair.server_hash.length === 64 && fair.nonce === 0);
+    assert.equal((await g('/games/fair')).status, 404, 'seed endpoints are gone');
+    assert.equal((await g('/games/verify', { game: 'dice' })).status, 404, 'verifier is gone');
 
     // instant game: dice
     r = await g('/games/dice/bet', { amount: 100, params: { target: 50, mode: 'under' } });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     const d1 = r.data.bet;
     assert.equal(d1.status, 'settled');
-    assert.equal(d1.nonce, 1);
-    assert.equal(d1.server_seed, null, 'server seed hidden until rotation');
     const won = d1.result.roll < 50;
     assert.equal(d1.payout, won ? 198 : 0, 'dice pays 1.98× under 50');
     bal = bal - 100 + d1.payout;
@@ -284,9 +285,9 @@ async function postback(url, opts) {
 
     // every instant game runs
     const instant = {
-      limbo: { target: 2 }, coinflip: { side: 'heads', risk: 'medium' }, double: { pick: 'red' }, diamonds: { risk: 'low' },
+      limbo: { target: 2 }, coinflip: { side: 'heads', risk: 'medium' }, diamonds: { risk: 'low' },
       wheel: { risk: 'medium', segments: 20 }, plinko: { rows: 16, risk: 'high' }, keno: { picks: [1, 5, 9, 22, 40], risk: 'medium' },
-      baccarat: { side: 'banker' }, cases: { risk: 'high' }, dragontiger: { side: 'tie' },
+      baccarat: { chips: { banker: 50 } }, cases: { risk: 'high' }, dragontiger: { side: 'tie' },
     };
     for (const [game, params] of Object.entries(instant)) {
       r = await g(`/games/${game}/bet`, { amount: 50, params });
@@ -304,7 +305,6 @@ async function postback(url, opts) {
     assert.equal(mb.status, 'active');
     assert.ok(!('layout' in mb.view), 'mine positions hidden while playing');
     assert.equal((await g('/games/mines/bet', { amount: 200, params: { mines: 1 } })).status, 400, 'one open mines round at a time');
-    assert.equal((await g('/games/fair/rotate', { client_seed: 'abc' })).status, 400, 'cannot rotate with an open round');
     // reveal tiles until we either hit the mine or have two gems, then cash out
     let tile = 0;
     while (mb.status === 'active' && mb.view.revealed.length < 2) {
@@ -318,7 +318,7 @@ async function postback(url, opts) {
       const paidOnce = (await g('/games/bets?game=mines')).data.bets.find((x) => x.id === mb.id);
       assert.equal(paidOnce.status, 'settled');
       assert.equal(paidOnce.payout, Math.floor(200 * paidOnce.multiplier + 1e-9));
-      const wins = (await g('/me/history')).data.transactions.filter((t) => t.type === 'win' && t.description.startsWith('Mines'));
+      const wins = (await g('/me/history?section=transactions')).data.items.filter((t) => t.type === 'win' && t.description.startsWith('Mines'));
       assert.equal(wins.length, 1, 'double cash out only pays once');
       assert.ok(c1.status === 200 && c2.status === 200);
     }
@@ -332,14 +332,59 @@ async function postback(url, opts) {
     }
     assert.equal(bj.status, 'settled');
     assert.ok(bj.view.dealer.length >= 2);
-    // crash: auto cash out at 1.01 resolves server-side
-    r = await g('/games/crash/bet', { amount: 100, params: { auto: 1.01 } });
-    const cb = r.data.bet;
-    assert.ok(!('crashedAt' in cb.view), 'crash point hidden');
-    await new Promise((ok) => setTimeout(ok, 250));
-    r = await g(`/games/bets/${cb.id}/action`, { action: 'poll' });
-    assert.equal(r.data.bet.status, 'settled');
-    assert.ok([0, 101].includes(r.data.bet.payout), JSON.stringify(r.data.bet));
+    // timed rounds: a Double round takes several bets; the colour is hidden until the spin ends
+    const waitFor = async (game, pred, ms = 9000) => {
+      const end = Date.now() + ms;
+      for (;;) {
+        const v = (await g(`/games/rounds/${game}`)).data;
+        if (pred(v)) return v;
+        if (Date.now() > end) throw new Error(`timed out waiting on ${game}`);
+        await new Promise((ok) => setTimeout(ok, 120));
+      }
+    };
+    let dv = await waitFor('double', (v) => v.round.phase === 'betting');
+    assert.equal(dv.round.result, undefined, 'colour hidden while betting');
+    const dseq = dv.round.seq;
+    r = await g('/games/rounds/double/bet', { amount: 100, params: { side: 'red' } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal((await g('/games/rounds/double/bet', { amount: 200, params: { side: 'green' } })).status, 200, 'several bets on one round');
+    assert.equal((await g('/games/rounds/double/bet', { amount: 50, params: { side: 'purple' } })).status, 400, 'unknown colour');
+    dv = await waitFor('double', (v) => v.round.phase === 'playing' && v.round.seq === dseq);
+    assert.equal((await g('/games/rounds/double/bet', { amount: 100, params: { side: 'black' } })).status, 400, 'no bets while the wheel spins');
+    dv = await waitFor('double', (v) => v.history.some((h) => h.seq === dseq));
+    const color = dv.history.find((h) => h.seq === dseq).result.color;
+    const mine2 = (await g('/games/bets?game=double')).data.bets.slice(0, 2); // newest first: green 200, red 100
+    for (const b of mine2) {
+      assert.equal(b.status, 'settled');
+      const pays = { red: 2, black: 2, green: 14 }[b.params.side];
+      assert.equal(b.payout, b.params.side === color ? b.amount * pays : 0, `double pays ${b.params.side} vs ${color}`);
+    }
+
+    // crash: one bet per round, a cash out while the rocket climbs, and auto cash out settling itself
+    let cv = await waitFor('crash', (v) => v.round.phase === 'betting');
+    const cseq = cv.round.seq;
+    r = await g('/games/rounds/crash/bet', { amount: 100, params: { auto: 1.5 } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal((await g('/games/rounds/crash/bet', { amount: 100, params: {} })).status, 400, 'one bet per crash round');
+    cv = await waitFor('crash', (v) => v.round.phase === 'playing' && v.round.seq === cseq);
+    assert.ok(cv.round.mult >= 1 && cv.round.result === undefined, 'the crash point stays hidden while climbing');
+    r = await g('/games/rounds/crash/cashout', {});
+    const cashed = r.status === 200;
+    if (cashed) {
+      const mine3 = r.data.bets.find((b) => b.mine);
+      assert.equal(mine3.status, 'settled');
+      assert.equal(mine3.payout, Math.floor(100 * mine3.multiplier + 1e-9), 'cash out pays the climb it was taken at');
+    } else assert.match(r.data.error, /crashed|already/i, 'too late means it crashed first');
+    // force the round to its end and let the sweep settle it
+    await require('../src/db').db.run("UPDATE rounds SET end_at = 0 WHERE game = 'crash' AND phase = 'playing'");
+    await require('../src/games/rounds').sweep();
+    cv = (await g('/games/rounds/crash')).data;
+    const done = cv.history.find((h) => h.seq === cseq);
+    assert.ok(done && done.result.crash >= 1, 'round is done and reveals its crash point');
+    const cbet = (await g('/games/bets?game=crash')).data.bets[0];
+    assert.equal(cbet.status, 'settled');
+    if (!cashed) assert.equal(cbet.payout, done.result.crash > 1.5 ? 150 : 0, 'auto cash out at 1.5 pays only if the crash came later');
+
     // video poker: dealt hand only, then the draw replaces exactly the cards not held
     r = await g('/games/videopoker/bet', { amount: 100, params: {} });
     assert.equal(r.status, 200, JSON.stringify(r.data));
@@ -353,16 +398,6 @@ async function postback(url, opts) {
     assert.deepEqual(vpd.view.hand[0], vp.view.dealt[0]);
     assert.deepEqual(vpd.view.hand[2], vp.view.dealt[2]);
     assert.equal(vpd.payout, 100 * { royal: 800, straight_flush: 50, four: 25, full: 9, flush: 6, straight: 4, three: 3, two_pair: 2, jacks: 1, none: 0 }[vpd.view.result]);
-    // chicken: death lane hidden until the end
-    r = await g('/games/chicken/bet', { amount: 100, params: { difficulty: 'easy' } });
-    let ck = r.data.bet;
-    assert.ok(!('death' in ck.view), 'the losing lane stays on the server');
-    r = await g(`/games/bets/${ck.id}/action`, { action: 'step' });
-    ck = r.data.bet;
-    if (ck.status === 'active') {
-      r = await g(`/games/bets/${ck.id}/action`, { action: 'cashout' });
-      assert.equal(r.data.bet.payout, Math.floor(100 * 1.02 + 1e-9), 'one easy lane pays 1.02×');
-    } else assert.equal(ck.payout, 0);
     // towers, pump, hilo start and move
     for (const [game, params, move] of [['towers', { difficulty: 'easy' }, { action: 'pick', params: { col: 0 } }], ['pump', { difficulty: 'easy' }, { action: 'pump' }], ['hilo', {}, { action: 'hi' }]]) {
       r = await g(`/games/${game}/bet`, { amount: 50, params });
@@ -379,6 +414,18 @@ async function postback(url, opts) {
     const me = (await g('/me')).data.user;
     const settledBets = (await g('/games/bets')).data.bets;
     assert.ok(settledBets.length >= 10);
+    /* ---------- paging: lists answer one page at a time ---------- */
+    const p1 = (await g('/games/bets?limit=2')).data;
+    assert.ok(p1.bets.length <= 2 && p1.page === 1 && typeof p1.hasMore === 'boolean', 'bet history: page 1 holds at most 2');
+    const p2 = (await g('/games/bets?limit=2&page=2')).data;
+    assert.equal(p2.page, 2);
+    assert.ok(p2.bets.every((b) => !p1.bets.some((x) => x.id === b.id)), 'bet history: page 2 does not repeat page 1');
+    assert.ok((await admin('/admin/transactions?limit=3')).data.transactions.length <= 3, 'admin transactions are paged');
+    assert.ok(Array.isArray((await admin('/admin/games?page=1')).data.bets), 'admin games are paged');
+    assert.ok(Array.isArray((await g('/me/history?section=withdrawals')).data.items), 'history sections are paged');
+    assert.ok((await g('/me/referrals?limit=1')).data.referrals.length <= 1, 'referrals are paged');
+    assert.ok((await user('/leaderboard?period=all')).data.leaderboard.length <= 10, 'leaderboard is top 10');
+
     assert.equal(me.total_earned, 25 + 0, 'game winnings are not "earned"');
 
     // no max win: a 37× on $100 pays $3,700 (the house would need the balance for that, so give it some)
@@ -391,19 +438,7 @@ async function postback(url, opts) {
     }
     await admin('/admin/settings', { games_max_bet: 10000 }, 'PUT');
 
-    // rotate, then the old server seed is revealed and the dice result verifies
-    assert.equal((await g('/games/fair/rotate', { client_seed: 'my-new-seed' })).status, 200);
-    const old = (await g('/games/bets?game=dice')).data.bets.find((x) => x.id === d1.id);
-    assert.ok(old.server_seed && old.server_seed.length === 64, 'server seed revealed after rotation');
-    const v = (await client()('/games/verify', { game: 'dice', server_seed: old.server_seed, client_seed: old.client_seed, nonce: old.nonce, params: old.params })).data;
-    assert.equal(v.server_hash, old.server_hash, 'hash matches');
-    assert.equal(v.result.roll, d1.result.roll, 'verifier reproduces the roll');
-    assert.equal(v.rows.find((x) => x[0] === 'Roll')[1], d1.result.roll.toFixed(2), 'verifier rows show the roll');
-    for (const { id } of cfg.games) {
-      const vr = (await client()('/games/verify', { game: id, server_seed: old.server_seed, client_seed: 'c', nonce: 3 })).data;
-      assert.ok(Array.isArray(vr.rows) && vr.rows.length >= 2, `verify rows for ${id}`);
-    }
-    assert.equal((await g('/games/fair')).data.client_seed, 'my-new-seed');
+    assert.equal((await g('/games/fair/rotate', { client_seed: 'x' })).status, 404, 'rotate is gone');
 
     // admin stats
     const st = (await admin('/admin/games')).data;

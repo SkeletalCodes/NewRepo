@@ -97,7 +97,6 @@
         </div>
         <div class="gfield"><span class="gfield-l">Profit on win</span><div class="readout">${GG.coin()}<span id="lb-profit">0.00</span></div></div>
         <button class="gbtn primary lg block" id="lb-bet">Bet</button>
-        <p class="panel-note">Pick a risk level or type your own target. Low targets hit often; a 100× target lands about 1 time in 100.</p>
       </div>`));
       stage.appendChild(h(`<div class="lb-wrap">
         <div class="history" id="lb-hist"></div>

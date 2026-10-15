@@ -284,6 +284,21 @@ const SCHEMA = [
   'CREATE INDEX IF NOT EXISTS idx_oc_user ON offer_completions(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_oc_status ON offer_completions(status)',
   'CREATE INDEX IF NOT EXISTS idx_wd_status ON withdrawals(status)',
+  // Timed rounds (Double, Crash): one row per round, numbered per game. The unique index stops two
+  // requests from creating the same round.
+  `CREATE TABLE IF NOT EXISTS rounds (
+    id ${ID},
+    game TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    phase TEXT NOT NULL,
+    bet_end BIGINT NOT NULL,
+    play_at BIGINT,
+    end_at BIGINT,
+    settled_at BIGINT,
+    bets_n INTEGER NOT NULL DEFAULT 0,
+    result TEXT NOT NULL DEFAULT '{}'
+  )`,
+  'CREATE UNIQUE INDEX IF NOT EXISTS rounds_game_seq ON rounds(game, seq)',
 ];
 
 // Money settings are in US cents.
@@ -292,6 +307,7 @@ const SCHEMA = [
  * so the CREATE TABLE statements above stay as they were.
  */
 const ADDED_COLUMNS = {
+  bets: [['round_id', 'INTEGER']],
   users: [
     ['signup_ip', "TEXT NOT NULL DEFAULT ''"],
     ['last_ip', "TEXT NOT NULL DEFAULT ''"],
@@ -375,6 +391,7 @@ async function migrate() {
     }
     await t.run('CREATE INDEX IF NOT EXISTS idx_oc_release ON offer_completions(status, release_at)');
     await t.run('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)');
+    await t.run('CREATE INDEX IF NOT EXISTS idx_bets_round ON bets(round_id)');
     await t.run('CREATE INDEX IF NOT EXISTS idx_users_signup_ip ON users(signup_ip)');
     const defaults = DEFAULT_SETTINGS;
     for (const [k, v] of Object.entries(defaults)) {

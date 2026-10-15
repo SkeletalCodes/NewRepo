@@ -180,7 +180,6 @@
           <div class="gfield"><span class="gfield-l">Floor</span><div class="readout" id="tw-floor">0 / 8</div></div>
         </div>
         <button class="gbtn primary lg block" id="tw-btn">Bet</button>
-        <p class="panel-note">Start at the bottom and pick one tile per floor. Hit a skull and the run ends — cash out whenever you like.</p>
       </div>`));
       stage.appendChild(h(`<div class="tw-wrap"><div class="tw-tower" id="tw-tower"></div><div class="result-pop" id="tw-res"></div></div>`));
       build();

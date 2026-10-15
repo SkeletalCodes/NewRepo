@@ -1,83 +1,215 @@
-/* Double — a strip of 15 tiles spins past a marker: seven red, seven black, one green.
-   Red and black pay 2×, green pays 14×. One number (0-14) is drawn per round; 0 is green. */
+/* Double — one shared round after another. Betting is open for ten seconds: anyone can put money on red,
+   black or green, as many times as they like. Then the wheel spins and every bet settles together.
+   The server decides the colour when the round opens; the wheel only shows what was decided. */
 (function () {
   'use strict';
-  const { $, $$, h, fmt, fmtMult, sleep, rand } = GG;
+  const { $, $$, h, fmt, esc, clamp, follow } = GG;
 
-  const ORDER = [1, 14, 2, 13, 3, 12, 4, 0, 11, 5, 10, 6, 9, 7, 8]; // tile order along the strip
-  const PAYS = { red: 2, green: 14, black: 2 };
-  const LABEL = { red: 'Red', green: 'Green', black: 'Black' };
-  const CYCLES = 9, SPIN_MS = 5200;
+  const ORDER = [1, 14, 2, 13, 3, 12, 4, 0, 11, 5, 10, 6, 9, 7, 8]; // the wheel, in the order the strip shows it
+  const CYCLE = ORDER.length, CYCLES = 12, TILE = 54, GAP = 8;
+  const SPEED = 0.0135; // tiles per millisecond while the wheel turns
+  const EASE_MS = 2600;
+  const SIDES = { red: { label: 'Red', pays: 2 }, black: { label: 'Black', pays: 2 }, green: { label: 'Green', pays: 14 } };
   const colorOf = (n) => (n === 0 ? 'green' : n <= 7 ? 'red' : 'black');
 
-  let amount, pick = 'red', busy = false, alive = 0, pos = 15 + 7, jitter = 0, ticks = [];
+  let amount = null, sub = null, frameId = 0;
+  let view = null, bets = [], lastBets = [], lastSeq = null;
+  let pos = CYCLE * 3, spinning = false, spinSeq = null, easing = false, easeFrom = 0, easeTo = 0, easeT0 = 0, lastT = 0;
+  let shownResult = null, reveal = null;
   const history = [];
+  const locked = { red: false, black: false, green: false }; // a short lock per button: a double-click is one bet
 
-  /** Centre tile `index` of the strip under the marker. */
-  function place(index, off, animate) {
-    const strip = $('#db-strip');
-    if (!strip) return;
-    const tile = strip.firstElementChild, step = tile.offsetWidth + 8;
-    strip.style.transition = animate ? `transform ${SPIN_MS}ms cubic-bezier(.12, .62, .1, 1)` : 'none';
-    strip.style.transform = `translateX(${-(index * step + tile.offsetWidth / 2 + off * tile.offsetWidth)}px)`;
-    if (!animate) void strip.offsetWidth;
+  /* Betting is open while the round says so and the clock hasn't run out. */
+  const bettingOpen = () => !!(view && view.round.phase === 'betting' && sub && sub.now() < view.round.betEnd);
+
+  function buildStrip() {
+    let html = '';
+    for (let i = 0; i < CYCLE * CYCLES; i++) {
+      const n = ORDER[i % CYCLE];
+      html += `<div class="db-tile ${colorOf(n)}">${n}</div>`;
+    }
+    $('#db-strip').innerHTML = html;
   }
 
-  function ui() {
-    amount.lock(busy);
-    $('#db-spin').disabled = busy;
-    $$('#db-pick button').forEach((b) => { b.disabled = busy; b.classList.toggle('on', b.dataset.v === pick); });
-    $('#db-profit').textContent = fmt(Math.max(0, amount.get() * (PAYS[pick] - 1)));
-    $('#db-mult').textContent = fmtMult(PAYS[pick]);
+  /** Put the strip so that tile position `p` sits under the marker. */
+  function place() {
+    const el = $('#db-strip'), win = $('.db-window');
+    if (!el || !win) return;
+    const x = win.clientWidth / 2 - (pos * (TILE + GAP) + TILE / 2);
+    el.style.transform = `translate3d(${x}px, 0, 0)`;
   }
 
-  function paintHistory() {
-    $('#db-hist').innerHTML = history.slice(0, 16).map((n) => `<i class="db-h ${colorOf(n)}">${n}</i>`).join('') || '<span class="hp">No rounds yet</span>';
-    const last = history.slice(0, 50), c = { red: 0, green: 0, black: 0 };
-    last.forEach((n) => { c[colorOf(n)]++; });
-    $('#db-count').innerHTML = ['red', 'green', 'black'].map((k) => `<div class="db-stat ${k}"><i></i><b>${c[k]}</b><small>${LABEL[k]}</small></div>`).join('');
-  }
+  /** The strip position that shows `n`, a few laps ahead of where the wheel is now. */
+  const targetFor = (n) => (Math.floor(pos / CYCLE) + 3) * CYCLE + ORDER.indexOf(n);
 
-  function clearTicks() { ticks.forEach(clearTimeout); ticks = []; }
-
-  async function spin() {
-    if (busy) return;
-    const bet = amount.get();
-    const my = ++alive;
-    busy = true;
-    ui();
-    const res = await GG.bet('double', bet, { pick });
-    if (my !== alive) return;
-    if (!res) { busy = false; ui(); return; }
-    const n = res.bet.result.n, col = colorOf(n), won = col === pick;
-    $$('.db-tile.hit').forEach((t) => t.classList.remove('hit'));
+  function startSpin(seq) {
+    spinning = true;
+    spinSeq = seq;
+    easing = false;
+    lastBets = bets.slice(); // the bets this spin decides
     $('#db-res').className = 'result-pop';
     $('.db-window').classList.remove('won', 'lost');
-    ui();
+    GG.sfx('spin');
+  }
 
-    // snap back to the same tile in an early lap, then roll forward several laps to the winner
-    pos = 15 + (pos % 15);
-    place(pos, jitter, false);
-    pos = 15 * (CYCLES - 2) + ORDER.indexOf(n);
-    jitter = (rand() - 0.5) * 0.7;
-    place(pos, jitter, true);
-    clearTicks();
-    for (let t = 40, gap = 45; t < SPIN_MS - 250; gap *= 1.085, t += gap) ticks.push(setTimeout(() => GG.sfx('tick', 0.55), t));
-    await sleep(SPIN_MS + 120);
-    if (my !== alive) return;
+  function stopSpin(result) {
+    spinning = false;
+    easeFrom = pos;
+    easeTo = targetFor(result.n);
+    easeT0 = performance.now();
+    easing = true;
+    shownResult = result;
+  }
 
-    GG.settle(res, { from: $('.db-window') });
-    history.unshift(n);
-    paintHistory();
-    const tile = $('#db-strip').children[pos];
-    if (tile) tile.classList.add('hit');
-    $('.db-window').classList.add(won ? 'won' : 'lost');
+  /** The wheel has stopped: say what happened to the bets that were on this round. */
+  function showResult(result) {
+    const mine = lastBets.filter((b) => b.mine);
     const pop = $('#db-res');
-    pop.className = 'result-pop show ' + (won ? '' : 'bad');
-    pop.innerHTML = `<b>${LABEL[col]} ${n}</b><span>${GG.coin('sm')}${won ? '+' + fmt((res.bet.payout - res.bet.amount) / 100) : '-' + fmt(bet)}</span>`;
-    if (won && col === 'green') { GG.sfx('bigwin'); GG.confetti($('.db-wrap'), 70); } else GG.sfx(won ? 'win' : 'lose');
-    busy = false;
-    ui();
+    const name = SIDES[result.color] ? SIDES[result.color].label : '';
+    if (!mine.length) {
+      pop.className = 'result-pop show push';
+      pop.innerHTML = `<b class="${result.color}">${name} ${result.n}</b><span>${lastBets.length ? `${lastBets.length} bets settled` : 'No bets this round'}</span>`;
+      return;
+    }
+    const staked = mine.reduce((a, b) => a + b.amount, 0);
+    const back = mine.reduce((a, b) => a + (b.side === result.color ? b.amount * SIDES[b.side].pays : 0), 0);
+    const net = (back - staked) / 100;
+    pop.className = 'result-pop show ' + (net >= 0 ? '' : 'bad');
+    pop.innerHTML = `<b class="${result.color}">${name} ${result.n}</b><span>${GG.coin('sm')}${net >= 0 ? '+' : '−'}${fmt(Math.abs(net))}</span>`;
+    $('.db-window').classList.add(net >= 0 ? 'won' : 'lost');
+    GG.sfx(net > 0 ? 'win' : net < 0 ? 'lose' : 'push');
+    if (back >= 100000) GG.confetti($('.dbl-wrap'), 70);
+  }
+
+  function frame(t) {
+    frameId = GG.frame(frame);
+    const dt = Math.min(64, t - lastT);
+    lastT = t;
+    if (spinning) {
+      pos += dt * SPEED;
+      if (pos >= CYCLE * (CYCLES / 2)) pos -= CYCLE * 3; // the same picture three laps earlier
+    } else if (easing) {
+      const k = clamp((performance.now() - easeT0) / EASE_MS, 0, 1);
+      pos = easeFrom + (easeTo - easeFrom) * (1 - Math.pow(1 - k, 3));
+      if (k >= 1) { easing = false; GG.sfx('tick'); showResult(shownResult); }
+    }
+    place();
+    paintClock();
+  }
+
+  /* ---------- painting ---------- */
+  function totals() {
+    const t = { red: { n: 0, sum: 0, mine: 0 }, black: { n: 0, sum: 0, mine: 0 }, green: { n: 0, sum: 0, mine: 0 } };
+    for (const b of bets) {
+      if (!t[b.side]) continue;
+      t[b.side].n++;
+      t[b.side].sum += b.amount;
+      if (b.mine) t[b.side].mine += b.amount;
+    }
+    return t;
+  }
+
+  function paintClock() {
+    const el = $('#db-clock');
+    if (!el || !view) return;
+    const r = view.round;
+    if (r.phase === 'betting' && sub) {
+      const left = Math.max(0, (r.betEnd - sub.now()) / 1000);
+      el.textContent = `${left.toFixed(1)}s`;
+      $('#db-bar').style.transform = `scaleX(${clamp(left / 10, 0, 1)})`;
+      if (left <= 0) paintButtons();
+    } else {
+      el.textContent = spinning || easing ? 'Spinning' : '—';
+      $('#db-bar').style.transform = 'scaleX(0)';
+    }
+  }
+
+  function paintButtons() {
+    const open = bettingOpen();
+    for (const side of Object.keys(SIDES)) {
+      const b = $(`#db-bet-${side}`);
+      if (b) b.disabled = !open || locked[side];
+    }
+  }
+
+  function paint() {
+    if (!view) return;
+    const r = view.round;
+    $('#db-round').textContent = `Round #${r.seq}`;
+    $('#db-phase').textContent = bettingOpen() ? 'Place your bets' : spinning || easing ? 'No more bets' : r.phase === 'betting' ? 'Opening…' : 'Spinning…';
+    const t = totals();
+    for (const side of Object.keys(SIDES)) {
+      $(`#db-tot-${side}`).innerHTML = `${GG.coin('sm')}${fmt(t[side].sum / 100)}<small>${t[side].n} bet${t[side].n === 1 ? '' : 's'}</small>${t[side].mine ? `<em>you ${fmt(t[side].mine / 100)}</em>` : ''}`;
+    }
+    $('#db-feed').innerHTML = GG.feedTable(bets.map((b) => ({
+      who: b.username, color: b.avatar, side: b.side, sideLabel: SIDES[b.side] ? SIDES[b.side].label : b.side,
+      amount: b.amount, payout: 0, mult: 0, mine: b.mine, status: 'active',
+    })), ['player', 'side', 'bet'], 'No bets yet. Be the first.');
+    $('#db-history').innerHTML = history.slice(0, 14).map((x) => `<span class="db-h ${colorOf(x.n)}" title="Round #${x.seq}">${x.n}</span>`).join('') || '<span class="db-none">No rounds yet</span>';
+    paintButtons();
+  }
+
+  /* ---------- the server's answers ---------- */
+  function onView(v) {
+    const r = v.round;
+    if (!r) return;
+    if (lastSeq !== null && r.seq !== lastSeq) lastBets = bets.slice();
+    lastSeq = r.seq;
+    view = v;
+    bets = v.bets;
+    for (const x of v.history) {
+      if (!history.some((y) => y.seq === x.seq)) history.push({ seq: x.seq, n: x.result.n, color: x.result.color });
+    }
+    history.sort((a, b) => b.seq - a.seq);
+    if (r.phase === 'playing' && spinSeq !== r.seq) startSpin(r.seq);
+    const last = v.history[0];
+    if (spinning && last && last.seq === spinSeq) stopSpin(last.result);
+    if (!spinning && !easing && shownResult === null && last) {
+      shownResult = last.result;
+      pos = targetFor(last.result.n) - CYCLE * 2; // show the last result without spinning
+    }
+    paint();
+  }
+
+  /* ---------- betting ---------- */
+  async function betOn(side) {
+    if (!bettingOpen() || locked[side]) return;
+    locked[side] = true;
+    paintButtons();
+    setTimeout(() => { locked[side] = false; paintButtons(); }, 220);
+    const res = await GG.roundBet('double', amount.get(), { side });
+    if (res && sub) sub.push(res);
+    paint();
+  }
+
+  function mount(panel, stage) {
+    view = null; bets = []; lastBets = []; lastSeq = null; pos = CYCLE * 3; spinning = false; spinSeq = null; easing = false;
+    shownResult = null; reveal = null;
+    amount = GG.ui.amount();
+    panel.appendChild(amount.el);
+    panel.appendChild(h(`<div class="dbl-bets">
+      ${Object.keys(SIDES).map((side) => `<button type="button" class="dbl-bet ${side}" id="db-bet-${side}" data-side="${side}" disabled>
+        <b>${SIDES[side].label}</b><small>pays ${SIDES[side].pays}×</small>
+        <span class="dbl-bet-tot" id="db-tot-${side}">${GG.coin('sm')}0.00</span></button>`).join('')}
+    </div>`));
+    stage.appendChild(h(`<div class="dbl-wrap">
+      <div class="dbl-top">
+        <div class="dbl-round"><span id="db-round">Round</span><b id="db-phase">Connecting…</b></div>
+        <div class="dbl-clock"><span id="db-clock">—</span></div>
+      </div>
+      <div class="dbl-bar"><i id="db-bar"></i></div>
+      <div class="db-window dbl-window"><div class="db-marker"></div><div class="db-strip" id="db-strip"></div></div>
+      <div class="dbl-history" id="db-history"></div>
+      <div class="dbl-res-anchor"><div class="result-pop" id="db-res"></div></div>
+      <div class="dbl-feed-head"><span>Bets this round</span></div>
+      <div class="feed-wrap" id="db-feed"></div>
+    </div>`));
+    buildStrip();
+    $$('.dbl-bet').forEach((b) => b.addEventListener('click', () => { GG.sfx('click'); betOn(b.dataset.side); }));
+    sub = follow('double', onView);
+    lastT = performance.now();
+    frameId = GG.frame(frame);
+    GG.onLeave(() => { GG.unframe(frameId); if (sub) sub.stop(); sub = null; });
   }
 
   GG.registerGame({
@@ -90,60 +222,12 @@
       <rect x="-8" y="62" width="62" height="84" rx="14" fill="#191c26" stroke="rgba(255,255,255,.18)" stroke-width="2"/>
       <rect x="64" y="50" width="72" height="108" rx="16" fill="#1fae6a" stroke="#fff" stroke-width="4"/>
       <rect x="146" y="62" width="62" height="84" rx="14" fill="#d02c47" stroke="rgba(255,255,255,.18)" stroke-width="2"/>
-      <text x="100" y="117" font-size="34" font-weight="800" text-anchor="middle" fill="#fff" font-family="Outfit,Arial,sans-serif">14×</text>
-      <text x="22" y="114" font-size="24" font-weight="800" text-anchor="middle" fill="#8c94a8" font-family="Outfit,Arial,sans-serif">2×</text>
-      <text x="178" y="114" font-size="24" font-weight="800" text-anchor="middle" fill="#fff" font-family="Outfit,Arial,sans-serif">2×</text>
+      <text x="100" y="117" font-size="34" font-weight="800" text-anchor="middle" fill="#fff" font-family="Fredoka One,Inter,Arial,sans-serif">14×</text>
+      <text x="22" y="114" font-size="24" font-weight="800" text-anchor="middle" fill="#8c94a8" font-family="Fredoka One,Inter,Arial,sans-serif">2×</text>
+      <text x="178" y="114" font-size="24" font-weight="800" text-anchor="middle" fill="#fff" font-family="Fredoka One,Inter,Arial,sans-serif">2×</text>
       <path d="M100 44l-13-22h26z" fill="#eac837" stroke="#3f0d0d" stroke-width="3" stroke-linejoin="round"/>
       <path d="M100 164l-13 22h26z" fill="#eac837" stroke="#3f0d0d" stroke-width="3" stroke-linejoin="round"/>
     </svg>`,
-
-    mount(panel, stage) {
-      busy = false;
-      amount = GG.ui.amount();
-      panel.appendChild(amount.el);
-      panel.appendChild(h(`<div>
-        <div class="gfield"><span class="gfield-l">Bet on</span>
-          <div class="db-pick" id="db-pick">
-            <button type="button" data-v="red" class="red"><b>Red</b><small>2×</small></button>
-            <button type="button" data-v="green" class="green"><b>Green</b><small>14×</small></button>
-            <button type="button" data-v="black" class="black"><b>Black</b><small>2×</small></button>
-          </div></div>
-        <div class="row2">
-          <div class="gfield"><span class="gfield-l">Pays</span><div class="readout" id="db-mult"></div></div>
-          <div class="gfield"><span class="gfield-l">Profit on win</span><div class="readout">${GG.coin()}<span id="db-profit">0.00</span></div></div>
-        </div>
-        <button class="gbtn primary lg block" id="db-spin">Spin</button>
-        <p class="panel-note">Red and black each cover 7 of the 15 tiles. Green is a single tile — the high-risk pick at 14×.</p>
-      </div>`));
-      let tiles = '';
-      for (let c = 0; c < CYCLES; c++) ORDER.forEach((n) => { tiles += `<div class="db-tile ${colorOf(n)}">${n}</div>`; });
-      stage.appendChild(h(`<div class="db-wrap">
-        <div class="db-hist" id="db-hist"></div>
-        <div class="db-window"><div class="db-marker"></div><div class="db-strip" id="db-strip">${tiles}</div></div>
-        <div class="db-count" id="db-count"></div>
-        <div class="result-pop" id="db-res"></div>
-      </div>`));
-      $('#db-pick').addEventListener('click', (e) => {
-        const b = e.target.closest('button');
-        if (!b || b.disabled) return;
-        pick = b.dataset.v;
-        GG.sfx('click');
-        ui();
-      });
-      $('#db-spin').addEventListener('click', spin);
-      amount.onChange(ui);
-      pos = 15 + (pos % 15);
-      place(pos, jitter, false);
-      const onResize = () => { if (!busy) place(pos, jitter, false); };
-      window.addEventListener('resize', onResize);
-      GG.onLeave(() => window.removeEventListener('resize', onResize));
-      ui(); paintHistory();
-    },
-
-    unmount() {
-      alive++;
-      clearTicks();
-      busy = false;
-    },
+    mount,
   });
 })();

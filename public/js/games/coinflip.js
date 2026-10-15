@@ -141,7 +141,6 @@
         <div class="gfield"><span class="gfield-l">Profit on win <em style="font-style:normal;color:var(--dim)" id="cf-pays">1.98×</em></span>
           <div class="readout">${GG.coin()}<span id="cf-profit">0.00</span></div></div>
         <button class="gbtn primary lg block" id="cf-flip">Flip coin</button>
-        <p class="panel-note">Skull is heads, crossbones is tails. Higher risk needs a streak: every flip has to land on your call.</p>
       </div>`));
       stage.appendChild(h(`<div class="cf-wrap">
         <div class="cf-hist" id="cf-hist"></div>

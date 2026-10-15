@@ -68,10 +68,6 @@ window.GG.rules = {
     how: ['Bet, then Deal: you get five cards from a freshly shuffled 52-card deck.', 'Tap the cards you want to keep (they lift and say HELD), then Draw. Every card you didn\'t hold is replaced.', 'Your final hand pays from the table: a pair of jacks or better gives your bet back, two pair pays 2×, up to 800× for a royal flush.', 'The table above the cards shows what each hand pays for your bet.'],
     max: '800×', risk: 'Low with good play: about 99.5% comes back if you hold the right cards. Keep any paying hand, and keep high cards over junk.',
   },
-  chicken: {
-    how: ['Pick a difficulty and place a bet. Your chicken waits on the curb.', 'Press Go to cross one lane. Every lane you cross raises the multiplier shown on that lane.', 'Cash out whenever you like. If a car gets your chicken first, the bet is lost.', 'Make it across every lane and you\'re paid the top multiplier automatically.'],
-    max: '162×', risk: 'Difficulty sets the chance of a car in each lane: Easy 4%, Medium 12%, Hard 20%, Daredevil 40%.',
-  },
   cases: {
     how: ['Pick a risk level and open a case.', 'The reel spins and stops on one prize under the marker. The prize is a multiplier of your bet.', 'The chips under the reel list every prize and its chance at your risk level.'],
     max: '500×', risk: 'Low almost always returns something. High is empty more than half the time but holds the 500× jackpot. Every level returns 98%.',

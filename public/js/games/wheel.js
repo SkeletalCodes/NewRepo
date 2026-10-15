@@ -137,7 +137,6 @@
         <div class="gfield"><span class="gfield-l">Risk</span>${GG.ui.seg('wh-risk', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], risk)}</div>
         <div class="gfield"><span class="gfield-l">Segments</span>${GG.ui.seg('wh-count', [10, 20, 30, 40, 50].map((n) => [n, n]), count)}</div>
         <button class="gbtn primary lg block" id="wh-spin">Spin</button>
-        <p class="panel-note">Low risk wins small on most spins. High risk puts the whole prize on a single slice — with 50 segments that slice pays 49.5×.</p>
       </div>`));
       stage.appendChild(h(`<div class="wh-wrap">
         <div class="history" id="wh-hist"></div>

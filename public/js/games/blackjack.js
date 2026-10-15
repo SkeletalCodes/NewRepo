@@ -174,7 +174,6 @@
           <button class="gbtn ghost" id="bj-double">Double</button>
         </div>
         <button class="gbtn primary lg block" id="bj-deal">Deal</button>
-        <p class="panel-note">Blackjack pays 3:2. Dealer stands on 17. Double on any first two cards.</p>
       </div>`));
       stage.appendChild(h(`<div class="bj-table">
         <div class="bj-hand" id="bj-d"><div class="bj-cards"></div><div class="bj-score" hidden></div></div>

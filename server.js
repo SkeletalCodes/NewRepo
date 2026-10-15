@@ -9,12 +9,12 @@ const { seed, upgrade, ensureEnvAdmin } = require('./src/seed');
 const { processPostback, housekeeping } = require('./src/offerwalls');
 const games = require('./src/games/routes');
 
-// Crash rounds whose rocket already crashed get settled even if the player closed the tab.
+// Timed rounds (Double, Crash) that have finished get settled even if nobody is watching them.
 let lastGamesSweep = 0;
 function gamesHousekeeping() {
   if (Date.now() - lastGamesSweep < 15_000) return;
   lastGamesSweep = Date.now();
-  games.settleExpiredCrash().catch((err) => console.error('crash sweep failed', err.message));
+  games.sweepRounds().catch((err) => console.error('round sweep failed', err.message));
 }
 
 // Schema + seed run once per process (once per cold start on serverless hosts).

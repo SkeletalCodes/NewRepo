@@ -195,7 +195,6 @@
         <div class="gfield"><span class="gfield-l">Rows</span>
           <div class="gseg" id="pl-rows">${[8, 12, 16].map((r) => `<button data-v="${r}" class="${r === rows ? 'on' : ''}">${r}</button>`).join('')}</div></div>
         <button class="gbtn primary lg block" id="pl-drop">Drop ball</button>
-        <p class="panel-note">Each click drops another ball — stack as many as you like. Edges pay big, the middle pays small.</p>
       </div>`));
       stage.appendChild(h(`<div class="pl-box"><canvas id="pl-cv"></canvas><div class="pl-last" id="pl-last"></div></div>`));
       cv = $('#pl-cv');

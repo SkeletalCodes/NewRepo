@@ -1058,35 +1058,6 @@ body.g-theatre .main { margin-left: 0; }
   .vp-slot .pc-big { font-size: 34px; }
 }
 
-/* ---------- Chicken ---------- */
-.ch-wrap { position: relative; width: 100%; display: flex; flex-direction: column; align-items: center; }
-.ch-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; border-radius: 20px; border: 2px solid var(--line); background: #22252d; scrollbar-width: thin; }
-.ch-road { position: relative; display: flex; height: 380px; width: max-content; }
-.ch-curb { width: 112px; flex: none; display: grid; place-items: end center; padding-bottom: 14px; background: repeating-linear-gradient(0deg, #3a3e4a 0 22px, #343844 22px 44px); border-right: 6px solid #4a4f5d; }
-.ch-curb.end { border-right: 0; border-left: 6px solid #4a4f5d; background: repeating-linear-gradient(0deg, #1b4d32 0 22px, #1e5637 22px 44px); }
-.ch-curb span { font-family: var(--head); font-size: 13px; letter-spacing: .12em; color: rgba(255, 255, 255, .45); }
-.ch-lane { position: relative; width: 104px; flex: none; overflow: hidden; background: #2b2e37; border-right: 3px dashed rgba(234, 200, 55, .45); transition: background .25s; }
-.ch-lane:last-of-type { border-right: 0; }
-.ch-tag { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1; min-width: 74px; padding: 9px 8px; border-radius: 50%; aspect-ratio: 1; display: grid; place-items: center; font-family: var(--head); font-size: 14px; color: rgba(255, 255, 255, .8); background: radial-gradient(circle at 40% 35%, #4a4f5d, #30333d); border: 3px solid #52586a; box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .3); transition: background .25s, border-color .25s, color .25s, transform .25s; }
-.ch-lane.next .ch-tag { border-color: var(--gold); color: var(--gold); transform: translate(-50%, -50%) scale(1.06); box-shadow: 0 0 22px rgba(234, 200, 55, .35); }
-.ch-lane.done { background: #24332b; }
-.ch-lane.done .ch-tag { background: radial-gradient(circle at 40% 35%, #2ef0a1, #0f9d62); border-color: #0f9d62; color: #022a19; }
-.ch-car { position: absolute; left: 50%; top: -110px; width: 46px; height: 82px; margin-left: -23px; z-index: 2; opacity: 0; }
-.ch-car svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .5)); }
-.ch-lane.busy .ch-car { opacity: 1; animation: g-chDrive 1.2s linear forwards; }
-.ch-lane.hit .ch-car { opacity: 1; animation: g-chHit .45s cubic-bezier(.4, 0, .7, .4) forwards; }
-@keyframes g-chDrive { from { transform: translateY(0); } to { transform: translateY(600px); } }
-@keyframes g-chHit { from { transform: translateY(0); } to { transform: translateY(250px); } }
-.ch-hen { position: absolute; left: 0; top: 50%; width: 76px; height: 76px; margin-top: -38px; z-index: 3; transition: transform .32s cubic-bezier(.3, 1.3, .5, 1); pointer-events: none; }
-.ch-hen svg { width: 100%; height: 100%; display: block; }
-.ch-hen.hop svg { animation: g-chHop .32s ease-out; }
-.ch-hen.dead svg { animation: g-chSplat .5s forwards; }
-.ch-hen.safe svg { animation: g-chHop .4s ease-out 2; }
-@keyframes g-chHop { 40% { transform: translateY(-24px) scale(1.05); } }
-@keyframes g-chSplat { 30% { transform: scale(1.25, .7) rotate(-10deg); } 100% { transform: scale(1.4, .25) translateY(40px); opacity: .55; filter: grayscale(1); } }
-.ch-wrap .result-pop { top: 40%; }
-@container bbg (max-width: 736px) { .ch-road { height: 320px; } .ch-lane { width: 88px; } .ch-curb { width: 84px; } .ch-tag { min-width: 62px; font-size: 13px; } .ch-hen { width: 64px; height: 64px; margin-top: -32px; } }
-
 /* ---------- Cases ---------- */
 .cs-wrap { position: relative; width: 100%; max-width: 880px; display: flex; flex-direction: column; align-items: center; gap: 20px; }
 .cs-box { width: 120px; height: 120px; }

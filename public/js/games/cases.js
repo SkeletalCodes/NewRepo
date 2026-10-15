@@ -131,7 +131,6 @@
       panel.appendChild(h(`<div>
         <div class="gfield"><span class="gfield-l">Risk</span>${GG.ui.seg('cs-risk', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']], risk)}</div>
         <button class="gbtn primary lg block" id="cs-open">Open case</button>
-        <p class="panel-note">Every case holds one prize. Low risk almost always gives something back; High risk is empty more than half the time but hides a 500× jackpot. Every risk level returns 98%.</p>
       </div>`));
       stage.appendChild(h(`<div class="cs-wrap">
         <div class="history" id="cs-hist"></div>

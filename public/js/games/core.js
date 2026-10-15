@@ -1,14 +1,13 @@
-/* GoldRush games: the shared engine. Ported from the original game site's core: the game frame, bet amount
-   control, Manual/Auto betting, hotkeys, live stats, sound effects, rules and the provably-fair window.
-   Every result comes from the server (/api/games); the game files only animate what the server decided.
-   Amounts inside the games are dollars (like the original's coins); the API works in cents. */
+/* GoldRush games: the shared engine. The game frame, the bet controls, the live feeds, the timed-round
+   follower and the lobby. Every result comes from the server (/api/games); the game files only animate
+   what the server decided. Dollars on screen, cents on the wire. */
 (() => {
   'use strict';
 
   const GR = window.GR;
   const { $, $$, esc } = GR;
 
-  /* ---------- tiny helpers ---------- */
+  /* ---------- helpers ---------- */
   const h = (html) => {
     const t = document.createElement('template');
     t.innerHTML = html.trim();
@@ -21,6 +20,7 @@
   const fmtMult = (x) => (x >= 1000 ? Math.round(x).toLocaleString('en-US') : Number(x).toFixed(2)) + '×';
   const cents = (dollars) => Math.round(dollars * 100);
   const coin = (cls = '') => `<svg class="gcoin ${cls}" viewBox="0 0 64 64" aria-hidden="true"><use href="#gr-coin"/></svg>`;
+  const money = (c) => `${c < 0 ? '−' : ''}$${fmt(Math.abs(c) / 100)}`;
   const emit = (name, detail) => document.dispatchEvent(new CustomEvent(name, { detail }));
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -35,8 +35,7 @@
   }
   const randInt = (n) => Math.floor(rand() * n);
 
-  /* Animation frames that keep running when the browser stops delivering them (background tabs and
-     embedded previews can pause requestAnimationFrame, which would freeze Crash and Plinko mid-round). */
+  /* Animation frames that keep running when the browser stops delivering them (background tabs). */
   let frameSeq = 0;
   const frames = new Map();
   function frame(fn) {
@@ -63,24 +62,26 @@
   const prefs = Object.assign({ sound: true, hotkeys: true }, store.get('gg.prefs', {}));
   const savePrefs = () => store.set('gg.prefs', prefs);
 
-  /* ---------- icons (24px stroke set from the original) ---------- */
+  /* ---------- icons ---------- */
   const ICONS = {
+    heart: '<path d="M12 20s-7.500-4.600-7.500-10.200C4.500 6.500 6.400 4.500 8.800 4.500c1.400 0 2.500.8 3.200 1.900.7-1.100 1.800-1.900 3.200-1.900 2.400 0 4.300 2 4.300 5.300C19.500 15.400 12 20 12 20z"/>',
     star: '<path d="M12 3.500l2.600 5.400 5.900.8-4.300 4.100 1 5.800-5.200-2.700-5.200 2.700 1-5.800-4.300-4.100 5.900-.8z"/>',
     info: '<circle cx="12" cy="12" r="8.500"/><path d="M12 11v5M12 8h.01"/>',
     chart: '<path d="M5 19v-8M12 19V5M19 19v-6"/>',
     expand: '<path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/>',
-    shield: '<path d="M12 2.500l8 3v6c0 5-3.400 8.700-8 10-4.600-1.300-8-5-8-10v-6z"/><path d="M8.500 12l2.500 2.500 4.500-5"/>',
     sound: '<path d="M4 9.500h3.500L12 5.500v13l-4.500-4H4z"/><path d="M15.500 8.500a5 5 0 0 1 0 7M18 6a8.500 8.500 0 0 1 0 12"/>',
     mute: '<path d="M4 9.500h3.500L12 5.500v13l-4.500-4H4z"/><path d="M16 9.500l5 5M21 9.500l-5 5"/>',
     reset: '<path d="M5 12a7 7 0 1 0 2.200-5.100"/><path d="M5 4.500v3.500h3.500"/>',
     back: '<path d="M15 5l-7 7 7 7"/>',
+    left: '<path d="M14.500 5.500L8 12l6.500 6.500"/>',
+    right: '<path d="M9.500 5.500L16 12l-6.500 6.500"/>',
+    bolt: '<path d="M13 3L5 13.500h6L10 21l8-10.500h-6z"/>',
+    live: '<circle cx="12" cy="12" r="4"/><path d="M6.300 6.300a8 8 0 0 0 0 11.400M17.700 6.300a8 8 0 0 1 0 11.400"/>',
   };
   const ic = (name, size) => `<svg viewBox="0 0 24 24" width="${size || 18}" height="${size || 18}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
-  /* =====================================================================
-     Sound effects, synthesised live with the Web Audio API (from the original, minus the music)
-     ===================================================================== */
-  let actx = null, sfxBus, tensBus, noiseBuf;
+  /* ---------- sound effects (synthesised live, no audio files) ---------- */
+  let actx = null, sfxBus, tensBus;
   const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
   function bootAudio() {
     if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
@@ -92,10 +93,6 @@
     comp.connect(actx.destination);
     sfxBus = actx.createGain(); sfxBus.gain.value = 0.7; sfxBus.connect(comp);
     tensBus = actx.createGain(); tensBus.gain.value = 0.5; tensBus.connect(comp);
-    const len = actx.sampleRate * 2;
-    noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
-    const d = noiseBuf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
   }
   ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { if (prefs.sound && $('.bbg')) bootAudio(); }, { passive: true }));
 
@@ -121,8 +118,12 @@
     osc.start(t); osc.stop(t + dur + 0.05);
   }
   function noise(bus, o) {
+    const len = actx.sampleRate * 0.6;
+    const buf = actx.createBuffer(1, len, actx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     const src = actx.createBufferSource();
-    src.buffer = noiseBuf; src.loop = true;
+    src.buffer = buf;
     const fl = actx.createBiquadFilter();
     fl.type = o.ft || 'highpass'; fl.Q.value = o.q || 0.7;
     fl.frequency.setValueAtTime(o.fc || 6000, o.t);
@@ -132,11 +133,12 @@
     g.gain.linearRampToValueAtTime(o.g || 0.1, o.t + 0.002);
     g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
     src.connect(fl); fl.connect(g); g.connect(bus);
-    src.start(o.t, Math.random() * 1.5); src.stop(o.t + o.dur + 0.05);
+    src.start(o.t); src.stop(o.t + o.dur + 0.05);
   }
   const SFX = {
     click(t) { tone(sfxBus, { type: 'square', f: 1100, t, dur: 0.03, g: 0.045, lp: 3000 }); },
     bet(t) { noise(sfxBus, { t, dur: 0.05, g: 0.11, ft: 'bandpass', fc: 3200, q: 2 }); tone(sfxBus, { type: 'triangle', f: 520, slide: 760, t, dur: 0.09, g: 0.09 }); },
+    chip(t) { noise(sfxBus, { t, dur: 0.06, g: 0.12, ft: 'bandpass', fc: 2400, q: 2.5 }); tone(sfxBus, { type: 'triangle', f: 900, slide: 620, t, dur: 0.05, g: 0.06 }); },
     win(t) { [72, 76, 79, 84].forEach((n, i) => tone(sfxBus, { type: 'triangle', f: mtof(n), t: t + i * 0.07, dur: 0.28, g: 0.14 })); },
     bigwin(t) {
       [60, 64, 67, 72, 76, 79, 84, 88].forEach((n, i) => {
@@ -161,6 +163,7 @@
     lock(t) { tone(sfxBus, { f: 90, slide: 45, t, dur: 0.35, g: 0.34 }); noise(sfxBus, { t, dur: 0.12, g: 0.06, fc: 3000 }); },
     impact(t) { tone(sfxBus, { f: 110, slide: 38, t, dur: 0.6, g: 0.45 }); noise(sfxBus, { t, dur: 0.35, g: 0.12, ft: 'lowpass', fc: 2400, fcTo: 200 }); },
     aww(t) { tone(sfxBus, { type: 'sawtooth', f: 300, slide: 140, t, dur: 0.45, g: 0.06, lp: 900 }); },
+    spin(t) { for (let i = 0; i < 6; i++) tone(sfxBus, { type: 'triangle', f: 1200 - i * 90, t: t + i * 0.05, dur: 0.04, g: 0.03 }); },
   };
   function sfx(name, arg) {
     if (!prefs.sound || !actx || actx.state !== 'running') return;
@@ -188,10 +191,7 @@
     if (!level) clearTimeout(tBeat);
   }
 
-  /* =====================================================================
-     Balance: the server is the truth. While a result is still animating, the top bar keeps showing
-     the balance from before it, so the win lands when the animation does.
-     ===================================================================== */
+  /* ---------- balance for step games. Round games update the top bar from the server's answer. ---------- */
   const bal = { inflight: 0, hidden: 0 };
   const me = () => GR.state.user;
   const balance = () => (me() ? (me().balance - bal.hidden - bal.inflight) / 100 : 0);
@@ -201,6 +201,11 @@
   const loadCfg = async () => { if (!cfg) cfg = await GR.api('/games/config'); return cfg; };
   const minBet = () => (cfg ? cfg.min / 100 : 0.1);
   const maxBet = () => (cfg ? cfg.max / 100 : 100);
+
+  /** Pull the balance from the server (after a round settles, or when a result came from elsewhere). */
+  async function syncMe() {
+    try { GR.setUser((await GR.api('/me')).user); } catch { /* offline: the next answer will fix it */ }
+  }
 
   let placed = false;
   /** Check a wager and take it off the shown balance. Returns false (and says why) if it can't be placed. */
@@ -223,7 +228,7 @@
     if (res.bet && res.bet.status === 'settled' && res.bet.payout > 0) bal.hidden += res.bet.payout;
   }
 
-  /** Place a bet on the server. Resolves to the server's answer, or null if it was refused. */
+  /** Place a bet on the server (instant and step games). Resolves to the server's answer, or null. */
   async function bet(game, amount, params) {
     if (!placeBet(amount)) return null;
     const c = cents(amount);
@@ -242,7 +247,7 @@
     }
   }
 
-  /** A move in a round game (hit, reveal, cash out...). Resolves to the server's answer or null. */
+  /** A move in a step game (hit, reveal, cash out...). Resolves to the server's answer or null. */
   async function act(betId, action, params = {}, extraStake = 0) {
     if (extraStake) {
       if (balance() + 1e-9 < extraStake) { GR.toast('Not enough balance for that.', 'error'); return null; }
@@ -264,89 +269,82 @@
     }
   }
 
-  /** An unfinished round of this game, if the player left one (rounds survive reloads). */
+  /** An unfinished step-game round of this game, if the player left one (rounds survive reloads). */
   async function active(game) {
     if (!me()) return null;
     try { const { bets } = await GR.api('/games/active'); return bets.find((b) => b.game === game) || null; } catch { return null; }
   }
 
-  /* ---------- settling: balance, live stats, effects, autobet ---------- */
-  const live = { profit: 0, wagered: 0, wins: 0, losses: 0, pts: [0] };
+  /* ---------- timed rounds (Double, Crash) ---------- */
 
-  /** Show a finished bet: release its payout to the balance (coins fly from `from`), log it, flash the stage. */
-  function settle(res, opts = {}) {
-    const b = res.bet;
-    if (!b || b.status !== 'settled' || b._shown) return;
-    b._shown = true;
-    if (b.payout > 0) bal.hidden = Math.max(0, bal.hidden - b.payout);
-    const from = opts.from || $('#g-stage');
-    if (b.payout > 0 && !opts.quiet && from && from.isConnected && !GR.reduced && GR.flyCoins) {
-      GR.flyCoins(from, Math.min(14, 4 + Math.round(b.multiplier * 2))).then(showBal);
-    } else showBal();
-
-    const wager = b.amount / 100, payout = b.payout / 100, net = round2(payout - wager);
-    live.wagered = round2(live.wagered + wager);
-    live.profit = round2(live.profit + net);
-    if (net > 0) live.wins++; else if (net < 0) live.losses++;
-    live.pts.push(live.profit);
-    if (live.pts.length > 120) live.pts.shift();
-    paintLive();
-
-    const st = $('#g-stage');
-    if (st && net !== 0) { st.classList.remove('fx-win', 'fx-lose'); void st.offsetWidth; st.classList.add(net > 0 ? 'fx-win' : 'fx-lose'); }
-    if (st && payout > 0 && b.multiplier >= 10) coins(st, b.multiplier >= 50 ? 44 : 26);
-    autoSettled({ id: b.game, wager, payout });
-    myBetsSoon();
+  /**
+   * Follows a timed round. Polls the server, keeps this device's clock in step with the server's, and
+   * calls onView with every answer. The server decides every bet; this only tells the page what happened.
+   */
+  function follow(game, onView, every = 900) {
+    let stopped = false, timer = 0, offset = 0, lastSeq = null;
+    const apply = (v) => {
+      if (!v || !v.round) return;
+      if (lastSeq !== null && v.round.seq !== lastSeq) syncMe(); // a round ended: the balance may have moved
+      lastSeq = v.round.seq;
+      onView(v);
+    };
+    const tick = async () => {
+      if (stopped) return;
+      const t0 = Date.now();
+      try {
+        const v = await GR.api(`/games/rounds/${game}`);
+        offset = v.now - (t0 + Date.now()) / 2;
+        apply(v);
+      } catch { /* try again in a moment */ }
+      if (!stopped) timer = setTimeout(tick, every);
+    };
+    tick();
+    return {
+      now: () => Date.now() + offset,
+      /** Show an answer from a bet or cash out straight away. */
+      push: apply,
+      stop() { stopped = true; clearTimeout(timer); },
+    };
   }
 
-  /** Gold $ coins raining through a box: used for big wins. */
-  function coins(box, count) {
-    if (!box || GR.reduced) return;
-    const layer = h('<div class="coin-rain"></div>');
-    for (let i = 0; i < (count || 24); i++) {
-      const c = h(coin());
-      const size = 14 + rand() * 16;
-      c.style.cssText = `position:absolute;top:-40px;left:${rand() * 100}%;--cs:${size}px;animation:g-coinFall ${1.1 + rand() * 0.9}s cubic-bezier(.4,0,.9,.6) ${rand() * 0.5}s forwards;--sway:${rand() * 80 - 40}px`;
-      layer.appendChild(c);
+  /** Put a bet into the current betting window. Dollars in, the server's round view and balance out. */
+  async function roundBet(game, dollars, params) {
+    if (!me()) { GR.openAuth('register'); return null; }
+    if (dollars < minBet() - 1e-9) { GR.toast(`The minimum bet is $${fmt(minBet())}.`, 'error'); return null; }
+    if (dollars > maxBet() + 1e-9) { GR.toast(`The maximum bet is $${fmt(maxBet())}.`, 'error'); return null; }
+    if (dollars > balance() + 1e-9) { GR.toast('Not enough balance for that bet.', 'error'); nudge($('.balance')); return null; }
+    try {
+      const res = await GR.api(`/games/rounds/${game}/bet`, { body: { amount: cents(dollars), params } });
+      GR.setUser(res.user);
+      sfx('chip');
+      return res;
+    } catch (err) {
+      GR.toast(err.message, 'error');
+      return null;
     }
-    box.appendChild(layer);
-    setTimeout(() => layer.remove(), 2700);
   }
 
-  /** Gold confetti burst inside a positioned container. */
-  function confetti(box, count) {
-    if (!box || GR.reduced) return;
-    const layer = h('<div class="confetti"></div>');
-    const cols = ['#eac837', '#d4b42e', '#fff6c4', '#14f195', '#ffffff'];
-    for (let i = 0; i < (count || 60); i++) {
-      const p = document.createElement('i');
-      const ang = rand() * Math.PI * 2, dist = 120 + rand() * 260;
-      p.style.cssText = `--dx:${Math.cos(ang) * dist}px;--dy:${Math.sin(ang) * dist - 80}px;--r:${rand() * 720 - 360}deg;background:${cols[randInt(cols.length)]};animation-delay:${rand() * 120}ms;width:${6 + rand() * 6}px;height:${8 + rand() * 8}px`;
-      layer.appendChild(p);
+  async function roundCashout() {
+    try {
+      const res = await GR.api('/games/rounds/crash/cashout', { body: {} });
+      GR.setUser(res.user);
+      sfx('cashout');
+      return res;
+    } catch (err) {
+      GR.toast(err.message, 'error');
+      return null;
     }
-    box.appendChild(layer);
-    setTimeout(() => layer.remove(), 2200);
   }
 
-  /** Brief attention pulse, e.g. on the Bet button when a tile is clicked with no round running. */
-  function nudge(el) {
-    if (!el) return;
-    el.classList.remove('nudge');
-    void el.offsetWidth;
-    el.classList.add('nudge');
-    setTimeout(() => el.classList.remove('nudge'), 500);
-  }
-
-  /* =====================================================================
-     Shared widgets
-     ===================================================================== */
+  /* ---------- controls ---------- */
   let lastAmount = null;
   /** The bet amount box (dollars) with ½, 2× and Max, and validation. Remembers the last amount. */
   function amountField(opts = {}) {
     const start = opts.value || store.get('gg.bet', 1) || 1;
     const el = h(`
       <div class="gfield">
-        <span class="gfield-l">${opts.label || 'Bet Amount'}</span>
+        <span class="gfield-l">${opts.label || 'Bet amount'}</span>
         <div class="gamount">
           ${coin()}
           <input type="text" inputmode="decimal" value="${Number(start).toFixed(2)}" aria-label="Bet amount" maxlength="12">
@@ -424,7 +422,7 @@
   }
   const setSeg = (el, value) => $$('button', el).forEach((x) => x.classList.toggle('on', x.dataset.v === String(value)));
 
-  /** Playing cards. The server sends { r, s, red, i }; suits get a text-style selector so phones don't draw emoji. */
+  /* Playing cards. The server sends { r, s, red, i }; suits use the text presentation so phones don't draw emoji. */
   const suit = (s) => String(s || '').replace(/️|︎/g, '') + (s ? '︎' : '');
   const cards = {
     el(c, down) {
@@ -436,15 +434,57 @@
     suit,
   };
 
-  /* =====================================================================
-     Games, the game page, leaving
-     ===================================================================== */
+  /* Chips, in dollars. A stack on the table shows the amount as a few discs of the largest denominations. */
+  const CHIPS = [[0.1, '#56688f'], [0.5, '#22a268'], [1, '#2d7be0'], [5, '#8f55e0'], [25, '#e0832a'], [100, '#dc3350'], [500, '#1f2937']];
+  const chipLabel = (n) => (n < 1 ? `${Math.round(n * 100)}¢` : n >= 1000 ? `${(n / 1000).toFixed(n % 1000 ? 1 : 0)}k` : `$${Number.isInteger(n) ? n : n.toFixed(2)}`);
+  /** HTML for a stack of chips worth `dollars` (at most five discs, so a big stack stays on the table). */
+  function chipStack(dollars) {
+    let left = round2(dollars);
+    const discs = [];
+    for (let i = CHIPS.length - 1; i >= 0 && discs.length < 5; i--) {
+      const [v, c] = CHIPS[i];
+      while (left + 1e-9 >= v && discs.length < 5) { discs.push(c); left = round2(left - v); }
+    }
+    if (!discs.length) discs.push(CHIPS[0][1]);
+    return `<span class="chipstack" aria-label="${chipLabel(dollars)}">${discs.map((c, i) => `<i class="disc" style="--cc:${c};--i:${i}"></i>`).join('')}<b>${chipLabel(dollars)}</b></span>`;
+  }
+  const chipButtons = (selected) => CHIPS.map(([v, c]) => `<button type="button" class="chipbtn${v === selected ? ' on' : ''}" data-v="${v}" style="--cc:${c}" aria-label="Chip ${chipLabel(v)}"><b>${chipLabel(v)}</b></button>`).join('');
+
+  /* Bet feeds: one table layout for the lobby, the game page and the round tables. */
+  const who = (name, color) => `${GR.avatar(name, color)}<span class="who-n">${esc(name)}</span>`;
+  /**
+   * rows: { game?, name?, who, color?, side?, amount (cents), payout (cents), mult, mine, status }
+   * cols: any of 'game', 'player', 'side', 'bet', 'mult', 'payout'
+   */
+  function feedTable(rows, cols = ['game', 'player', 'bet', 'mult', 'payout'], empty = 'No bets yet.') {
+    if (!rows.length) return `<div class="feed-empty">${esc(empty)}</div>`;
+    const head = { game: 'Game', player: 'Player', side: 'Side', bet: 'Bet', mult: 'Multiplier', payout: 'Payout' };
+    const cell = (c, r) => {
+      if (c === 'game') return `<span class="fc-game">${r.icon ? `<i class="fi">${r.icon}</i>` : ''}<b>${esc(r.name || '')}</b>${r.open ? '<em class="open-tag">open</em>' : ''}</span>`;
+      if (c === 'player') return `<span class="fc-player">${who(r.who, r.color)}</span>`;
+      if (c === 'side') return `<span class="fc-side ${r.side || ''}">${esc(r.sideLabel || r.side || '')}</span>`;
+      if (c === 'bet') return `<span class="fc-bet">${coin('sm')}${fmt(r.amount / 100)}</span>`;
+      if (c === 'mult') return `<span class="fc-mult ${r.mult > 1 ? 'hi' : r.mult > 0 ? '' : 'zero'}">${r.status === 'active' ? '<em class="live-dot"></em>live' : fmtMult(r.mult || 0)}</span>`;
+      if (c === 'payout') {
+        if (r.status === 'active') return `<span class="fc-pay">—</span>`;
+        const net = (r.payout || 0) - (r.amount || 0);
+        return `<span class="fc-pay ${net > 0 ? 'win' : net < 0 ? 'lose' : ''}">${net > 0 ? '+' : net < 0 ? '−' : ''}${coin('sm')}${fmt(Math.abs(net) / 100)}</span>`;
+      }
+      return '';
+    };
+    return `<div class="feed${cols.includes('side') ? ' feed-side' : ''}" role="table">
+      <div class="feed-row feed-head" role="row">${cols.map((c) => `<span role="columnheader">${head[c]}</span>`).join('')}</div>
+      ${rows.map((r) => `<div class="feed-row${r.mine ? ' mine' : ''}" role="row">${cols.map((c) => `<span role="cell">${cell(c, r)}</span>`).join('')}</div>`).join('')}
+    </div>`;
+  }
+
+  /* ---------- games, pages and the router ---------- */
   const games = {};
   const order = [];
   let current = null;
   let leaveHooks = [];
   const CATS = [['table', 'Table games'], ['instant', 'Instant win'], ['cashout', 'Climb & cash out']];
-  const DEFAULT_CAT = { blackjack: 'table', baccarat: 'table', roulette: 'table', hilo: 'table', crash: 'cashout', mines: 'cashout', towers: 'cashout', pump: 'cashout' };
+  const DEFAULT_CAT = { blackjack: 'table', baccarat: 'table', roulette: 'table', hilo: 'table', videopoker: 'table', dragontiger: 'table', crash: 'cashout', mines: 'cashout', towers: 'cashout', pump: 'cashout' };
   function registerGame(g) { g.cat = g.cat || DEFAULT_CAT[g.id] || 'instant'; games[g.id] = g; order.push(g.id); }
   function onLeave(fn) { leaveHooks.push(fn); }
 
@@ -457,7 +497,6 @@
     tension(0);
     $('#live-stats') && $('#live-stats').remove();
     document.body.classList.remove('g-theatre');
-    // anything still animating is already settled on the server: show the real balance
     if (bal.hidden || bal.inflight) { bal.hidden = 0; showBal(); }
   }
   const busy = () => bal.hidden > 0 || bal.inflight > 0 || !!auto;
@@ -470,6 +509,7 @@
     if (i >= 0) f.splice(i, 1); else f.unshift(id);
     store.set('gg.favs', f);
     sfx('click');
+    return i < 0;
   }
   function paintFav() {
     const b = $('#gf-fav');
@@ -479,6 +519,26 @@
     b.setAttribute('aria-pressed', on);
     b.title = on ? 'Remove from favourites' : 'Add to favourites';
   }
+
+  /** Feed for one game (step games; round games draw their own table). One page at a time. */
+  function paintGameFeed(id) {
+    const el = $('#gp-live');
+    if (!el) return;
+    const cols = ['player', 'bet', 'mult', 'payout'];
+    GR.pagedList(el, `/games/live?game=${id}`, 'bets', (bets) => feedTable(bets.map((b) => ({ name: b.name, who: b.username, color: b.avatar_color, amount: b.amount, payout: b.payout, mult: b.multiplier, status: 'settled' })), cols),
+      feedTable([], cols, 'Nobody has played this game yet.'));
+  }
+  /** My bets on this game, newest first, one page at a time. Open bets carry the open tag. */
+  function paintMyBets(id) {
+    const box = $('#mybets');
+    if (!box) return;
+    if (!me()) { box.innerHTML = '<div class="feed-empty">Log in to play. Your bets will show up here.</div>'; return; }
+    const name = games[id].name;
+    const cols = ['player', 'bet', 'mult', 'payout'];
+    GR.pagedList(box, `/games/bets?game=${id}`, 'bets', (list) => feedTable(list.map((b) => ({ name, who: me().username, color: me().avatar_color, amount: b.amount, payout: b.payout, mult: b.multiplier, mine: true, status: b.status })), cols),
+      feedTable([], cols, 'Your bets will show up here.'));
+  }
+  const myBetsSoon = (id) => setTimeout(() => paintMyBets(id), 600);
 
   async function play(id) {
     leave();
@@ -492,40 +552,37 @@
       return;
     }
     const info = cfg.games.find((x) => x.id === id);
-    const rtp = info ? info.rtp : g.rtp;
+    const rtp = Number(info ? info.rtp : g.rtp).toFixed(1);
+    const timed = !!(info && info.timed);
     GR.setContent(`<div class="bbg" id="bbg">
-      <div class="game-head">
-        <a href="#/games" class="back" aria-label="Back to games">${ic('back', 18)}</a>
-        <h1>${esc(g.name)}</h1>
-        <span class="chip-tag">Originals</span>
-        <span class="rtp">RTP ${Number(rtp).toFixed(1)}%</span>
-      </div>
+      <header class="gp-head">
+        <a href="#/games" class="gp-back" aria-label="All games">${ic('back', 18)}</a>
+        <span class="gp-badge" style="--c1:${g.colors[0]};--c2:${g.colors[1]}"><i>${g.icon}</i></span>
+        <div class="gp-title"><h1>${esc(g.name)}</h1><small>Originals${timed ? ' · <b class="live-pill">live rounds</b>' : ''}</small></div>
+        <span class="spacer"></span>
+        <span class="gp-rtp">RTP <b>${rtp}%</b></span>
+      </header>
       <div class="game" data-game="${id}">
         <div class="game-panel" id="g-panel"></div>
         <div class="game-stage" id="g-stage"></div>
         <div class="game-foot">
           <div class="gf-l">
-            <button class="gf-btn" id="gf-fav" aria-label="Favourite">${ic('star', 18)}</button>
+            <button class="gf-btn" id="gf-fav" aria-label="Favourite">${ic('heart', 18)}</button>
             <button class="gf-btn" id="gf-rules" title="How to play" aria-label="How to play">${ic('info', 18)}</button>
             <button class="gf-btn" id="gf-stats" title="Live stats" aria-label="Live stats">${ic('chart', 18)}</button>
             <button class="gf-btn" id="gf-theatre" title="Theatre mode" aria-label="Theatre mode">${ic('expand', 18)}</button>
             <button class="gf-btn${prefs.sound ? '' : ' muted'}" id="gf-sound" title="Sound" aria-label="Sound on or off">${ic(prefs.sound ? 'sound' : 'mute', 18)}</button>
           </div>
           <div class="gf-c">GOLD<b>RUSH</b></div>
-          <div class="gf-r"><button class="fair-chip" id="gf-fair" title="How results are generated">${ic('shield', 14)}Fairness</button></div>
         </div>
       </div>
-      <section class="card-sec">
-        <div class="sec-row"><h3>My bets</h3><span class="faint" style="font-size:12.5px;font-weight:600">${esc(g.name)} · newest first</span></div>
-        <div class="table four" id="mybets"></div>
-      </section>
-      <p class="g-legal"><i class="fa-solid fa-circle-info"></i> 18+ only. Bets use your real balance and every result is final. Play for fun, never to make money.</p>
+      ${timed ? '' : `<section class="gp-sec"><div class="gp-sec-head"><h3>${ic('live', 16)} Live bets</h3></div><div id="gp-live" class="feed-wrap"><div class="feed-empty">Loading…</div></div></section>`}
+      <section class="gp-sec"><div class="gp-sec-head"><h3>My bets</h3></div><div id="mybets" class="feed-wrap"></div></section>
     </div>`);
     current = g;
     $('#gf-fav').addEventListener('click', () => { toggleFav(id); paintFav(); });
     $('#gf-rules').addEventListener('click', openRules);
     $('#gf-stats').addEventListener('click', toggleLive);
-    $('#gf-fair').addEventListener('click', () => openFair());
     $('#gf-theatre').addEventListener('click', (e) => {
       const on = $('#bbg').classList.toggle('theatre');
       document.body.classList.toggle('g-theatre', on);
@@ -541,36 +598,13 @@
     paintFav();
     store.set('gg.recent', [id].concat(store.get('gg.recent', []).filter((x) => x !== id)).slice(0, 8));
     try { g.mount($('#g-panel'), $('#g-stage')); } catch (e) { console.error(e); }
-    if (!NO_AUTO[id]) addAuto($('#g-panel'));
-    paintMyBets();
-  }
-
-  /* ---------- my bets (from the server) ---------- */
-  let myTimer = 0;
-  const myBetsSoon = () => { clearTimeout(myTimer); myTimer = setTimeout(paintMyBets, 600); };
-  async function paintMyBets() {
-    const box = $('#mybets');
-    if (!box || !current) return;
-    if (!me()) { box.innerHTML = '<div class="gempty">Log in to play. Your bets will show up here.</div>'; return; }
-    let list = [];
-    try { list = (await GR.api(`/games/bets?game=${current.id}`)).bets.filter((b) => b.status === 'settled').slice(0, 10); } catch { return; }
-    if (!$('#mybets')) return;
-    const g = current;
-    box.innerHTML = list.length
-      ? `<div class="tr th"><span class="td g">Game</span><span class="td n">Bet</span><span class="td m">Multiplier</span><span class="td n">Profit</span></div>` + list.map((b) => {
-        const net = round2((b.payout - b.amount) / 100);
-        return `<div class="tr mine">
-          <span class="td g"><i class="gi">${g.icon || ''}</i>${esc(g.name)}<small class="nonce" title="Bet nonce, for the fairness checker">#${b.nonce}</small><button type="button" class="verify" data-vb="${b.id}">Verify</button></span>
-          <span class="td n">${coin('sm')}${fmt(b.amount / 100)}</span>
-          <span class="td m">${fmtMult(b.multiplier)}</span>
-          <span class="td n ${net > 0 ? 'pos' : 'neg'}">${net > 0 ? '+' : ''}${fmt(net)}</span>
-        </div>`;
-      }).join('')
-      : '<div class="gempty">Your bets will show up here.</div>';
-    $$('[data-vb]', box).forEach((btn) => btn.addEventListener('click', () => verifyBet(list.find((x) => String(x.id) === btn.dataset.vb))));
+    if (!NO_AUTO[id] && !timed) addAuto($('#g-panel'));
+    if (!timed) paintGameFeed(id);
+    paintMyBets(id);
   }
 
   /* ---------- live stats card: profit / wagered / wins / losses since it was last reset ---------- */
+  const live = { profit: 0, wagered: 0, wins: 0, losses: 0, pts: [0] };
   function paintLive() {
     const box = $('#live-stats');
     if (!box) return;
@@ -593,6 +627,16 @@
       c.strokeStyle = live.profit >= 0 ? '#14f195' : '#ff5c7a'; c.lineWidth = 2; c.lineJoin = 'round'; c.stroke();
     }
   }
+  /** Count a finished bet in the live stats card. Cents in. */
+  function track(wagerCents, payoutCents) {
+    const net = (payoutCents - wagerCents) / 100;
+    live.wagered = round2(live.wagered + wagerCents / 100);
+    live.profit = round2(live.profit + net);
+    if (net > 0) live.wins++; else if (net < 0) live.losses++;
+    live.pts.push(live.profit);
+    if (live.pts.length > 120) live.pts.shift();
+    paintLive();
+  }
   function toggleLive() {
     const old = $('#live-stats');
     if (old) { old.remove(); $('#gf-stats') && $('#gf-stats').classList.remove('on'); return; }
@@ -609,7 +653,7 @@
     paintLive();
   }
 
-  /* ---------- rules ---------- */
+  /* ---------- rules (the how-to-play text, from the original site) ---------- */
   function openRules() {
     const g = current;
     if (!g) return;
@@ -625,124 +669,11 @@
         <div><small>Top payout</small><b>${r.max || '—'}</b></div>
       </div>
       ${r.risk ? `<p class="rules-risk"><b>Risk:</b> ${r.risk}</p>` : ''}
-      <p class="fair-note">${prefs.hotkeys ? 'Shortcuts: <code>Space</code> bet · <code>A</code> halve the bet · <code>S</code> double it. ' : ''}Every result comes from your seed pair. Open <a href="#" id="rules-fair" style="color:var(--green)">Fairness</a> to check any bet.</p>
     </div>`);
-    $('#rules-fair').addEventListener('click', (e) => { e.preventDefault(); openFair(); });
   }
 
-  /* =====================================================================
-     Provably fair window (seeds come from the server; the verifier recomputes on the server)
-     ===================================================================== */
-  const copyField = (label, value, id) => `
-    <div class="gfield"><span class="gfield-l">${label}</span>
-      <div class="copy"><input type="text" readonly value="${esc(value)}"${id ? ` id="${id}"` : ''}><button type="button" data-copy>Copy</button></div></div>`;
-  const randomHex = (n) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, '0')).join('');
-
-  async function openFair(prefill) {
-    let f = null;
-    if (me()) { try { f = await GR.api('/games/fair'); } catch { /* shown as logged out */ } }
-    const gameOpts = order.map((id) => `<option value="${id}">${esc(games[id].name)}</option>`).join('');
-    const seeds = f ? `
-        ${copyField('Active client seed', f.client_seed)}
-        ${copyField('Active server seed (hashed)', f.server_hash)}
-        <div class="gfield"><span class="gfield-l">Bets made with this pair</span><div class="readout">${f.nonce}</div></div>
-        <div class="fair-sep"><span>Rotate seed pair</span></div>
-        <div class="gfield"><span class="gfield-l">New client seed</span>
-          <div class="copy"><input type="text" id="fair-new" value="${randomHex(8)}" maxlength="64" spellcheck="false"><button type="button" class="go" id="fair-rotate">Rotate</button></div></div>
-        ${copyField('Next server seed (hashed)', f.next_hash)}
-        ${f.previous ? `
-        <div class="fair-sep"><span>Previous pair — revealed</span></div>
-        ${copyField('Server seed (unhashed)', f.previous.server_seed)}
-        ${copyField('Client seed', f.previous.client_seed)}
-        <div class="fair-prev"><span>${f.previous.nonce} bet${f.previous.nonce === 1 ? '' : 's'} were made with it.</span><button type="button" class="gbtn ghost sm" id="fair-check">Verify one</button></div>` : `
-        <p class="hint left" style="font-size:13px;color:var(--muted)">Rotate the pair to reveal the current server seed, then check any bet you made with it in the Verify tab.</p>`}`
-      : '<div class="gempty">Log in to get your own seed pair.<br>The Verify tab works without an account.</div>';
-
-    const m = GR.openModal(`<div class="bbg-modal" id="fair">
-      <h2 class="modal-title">${ic('shield', 22)}Provably fair</h2>
-      <div class="gtabs"><button type="button" data-tab="seeds">Seeds</button><button type="button" data-tab="verify">Verify</button></div>
-      <div data-pane="seeds">${seeds}</div>
-      <div data-pane="verify" hidden>
-        <div class="row2">
-          <div class="gfield"><span class="gfield-l">Game</span><select id="fv-game">${gameOpts}</select></div>
-          <div class="gfield"><span class="gfield-l">Nonce</span><input type="text" inputmode="numeric" id="fv-nonce" value="1"></div>
-        </div>
-        <div class="gfield"><span class="gfield-l">Client seed</span><input type="text" id="fv-client" spellcheck="false"></div>
-        <div class="gfield"><span class="gfield-l">Server seed (unhashed)</span><input type="text" id="fv-server" spellcheck="false" placeholder="Revealed after you rotate the pair"></div>
-        <div class="fair-out" id="fv-out"></div>
-      </div>
-      <p class="fair-note">Results come from <code>HMAC-SHA256(serverSeed, clientSeed:nonce:cursor)</code>, 4 bytes per number. The hash shown before you bet is <code>SHA-256(serverSeed)</code>, so the seed can't be swapped afterwards. The server seed is kept on our server and only revealed when you rotate.</p>
-    </div>`, { cls: 'wide' });
-
-    const setTab = (t) => {
-      $$('.gtabs button', m).forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
-      $$('[data-pane]', m).forEach((p) => { p.hidden = p.dataset.pane !== t; });
-    };
-    $$('.gtabs button', m).forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
-    m.addEventListener('click', (e) => {
-      const c = e.target.closest('[data-copy]');
-      if (!c) return;
-      const input = c.parentElement.querySelector('input');
-      input.select();
-      const done = () => { c.textContent = 'Copied'; setTimeout(() => { c.textContent = 'Copy'; }, 1200); };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(input.value).then(done, done);
-      else { try { document.execCommand('copy'); } catch { /* ignore */ } done(); }
-    });
-
-    let vSeq = 0, vTimer = 0;
-    const runVerify = () => {
-      clearTimeout(vTimer);
-      vTimer = setTimeout(async () => {
-        const out = $('#fv-out', m);
-        if (!out) return;
-        const server = $('#fv-server', m).value.trim(), client = $('#fv-client', m).value.trim();
-        const nonce = parseInt($('#fv-nonce', m).value, 10);
-        if (!server || !client || !(nonce >= 0)) { out.innerHTML = '<div class="gempty">Enter a server seed, client seed and nonce.</div>'; return; }
-        const my = ++vSeq;
-        try {
-          const r = await GR.api('/games/verify', { body: { game: $('#fv-game', m).value, server_seed: server, client_seed: client, nonce } });
-          if (my !== vSeq || !out.isConnected) return;
-          out.innerHTML = r.rows.map((x) => `<div class="fo-row"><span>${esc(x[0])}</span><b>${esc(x[1])}</b></div>`).join('');
-        } catch (err) { if (my === vSeq) out.innerHTML = `<div class="gempty">${esc(err.message)}</div>`; }
-      }, 220);
-    };
-    $$('#fv-game, #fv-nonce, #fv-client, #fv-server', m).forEach((el) => el.addEventListener('input', runVerify));
-    const fillVerify = (v) => {
-      $('#fv-server', m).value = v.server || '';
-      $('#fv-client', m).value = v.client || '';
-      $('#fv-nonce', m).value = v.nonce != null ? v.nonce : 1;
-      if (v.game && games[v.game]) $('#fv-game', m).value = v.game;
-      setTab('verify');
-      runVerify();
-    };
-    const rot = $('#fair-rotate', m);
-    if (rot) rot.addEventListener('click', async () => {
-      try {
-        await GR.api('/games/fair/rotate', { body: { client_seed: $('#fair-new', m).value } });
-        GR.toast('Seed pair rotated. The old server seed is now revealed.', 'success');
-        openFair();
-        paintMyBets();
-      } catch (err) { GR.toast(err.message, 'error'); }
-    });
-    const chk = $('#fair-check', m);
-    if (chk) chk.addEventListener('click', () => fillVerify({ server: f.previous.server_seed, client: f.previous.client_seed, nonce: Math.max(1, f.previous.nonce), game: current && current.id }));
-    if (f) $('#fv-client', m).value = f.client_seed;
-    if (current) $('#fv-game', m).value = current.id;
-    if (prefill) fillVerify(prefill); else { setTab('seeds'); runVerify(); }
-  }
-
-  /** Open the verifier for one of your bets. */
-  function verifyBet(b) {
-    if (!b) return;
-    if (b.server_seed) { openFair({ server: b.server_seed, client: b.client_seed, nonce: b.nonce, game: b.game }); return; }
-    openFair({ client: b.client_seed, nonce: b.nonce, game: b.game });
-    GR.toast('That bet used your active seed pair. Rotate the pair (Seeds tab) to reveal its server seed.', 'info');
-  }
-
-  /* =====================================================================
-     Autobet (games that settle in one press)
-     ===================================================================== */
-  const NO_AUTO = { blackjack: 1, roulette: 1, hilo: 1, crash: 1, mines: 1, towers: 1, pump: 1, videopoker: 1, chicken: 1 };
+  /* ---------- autobet (games that settle in one press) ---------- */
+  const NO_AUTO = { blackjack: 1, roulette: 1, hilo: 1, crash: 1, mines: 1, towers: 1, pump: 1, videopoker: 1, double: 1, baccarat: 1, dragontiger: 1 };
   let auto = null;
   function autoPaint() {
     const el = $('#auto-stat');
@@ -753,7 +684,7 @@
     clearTimeout(auto.timer);
     const base = auto.base;
     auto = null;
-    if (lastAmount && base && $('#g-panel .gamount')) lastAmount.set(base); // put the bet back to where it started
+    if (lastAmount && base && $('#g-panel .gamount')) lastAmount.set(base);
     const box = $('#g-auto');
     if (box) {
       $('#auto-go').textContent = 'Start autobet';
@@ -762,7 +693,6 @@
     }
     if (why) GR.toast(why, 'info');
   }
-  /** Press the game's own button as soon as it's ready; stop if the bet is refused. */
   function autoNext(tries) {
     if (!auto) return;
     const btn = $('#g-panel .gbtn.lg');
@@ -801,13 +731,12 @@
     a.timer = setTimeout(() => {
       if (auto !== a) return;
       if (lastAmount && net !== 0) {
-        const pct = net > 0 ? a.onWin : a.onLoss; // 0% means "go back to the starting bet"
+        const pct = net > 0 ? a.onWin : a.onLoss;
         lastAmount.set(pct ? lastAmount.get() * (1 + pct / 100) : a.base);
       }
       autoNext();
     }, 280);
   }
-  /** Adds the Manual / Auto switch and the autobet form to a game's bet panel. */
   function addAuto(panel) {
     panel.insertBefore(h('<div class="gseg mode-seg" id="g-mode"><button type="button" data-v="manual" class="on">Manual</button><button type="button" data-v="auto">Auto</button></div>'), panel.firstChild);
     panel.appendChild(h(`<div class="auto-box" id="g-auto" hidden>
@@ -821,11 +750,68 @@
       </div>
       <label class="gfield"><span class="gfield-l">Stop at loss ($)</span><input type="text" inputmode="decimal" id="auto-sl" placeholder="Off" maxlength="10" aria-label="Stop at loss"></label>
       <button type="button" class="gbtn green lg block" id="auto-go">Start autobet</button>
-      <p class="auto-stat" id="auto-stat">Set the bets to 0 to keep going until you stop it. A raise of 0% goes back to your starting bet.</p>
+      <p class="auto-stat" id="auto-stat">Set the bets to 0 to keep going until you stop it.</p>
     </div>`));
     bindSeg($('#g-mode'), (v) => { autoStop(); $('#g-auto').hidden = v !== 'auto'; panel.classList.toggle('auto-on', v === 'auto'); });
     $('#auto-go').addEventListener('click', () => (auto ? autoStop('Autobet stopped.') : autoStart()));
     $$('#g-auto input').forEach((i) => i.addEventListener('input', () => { const c = i.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'); if (c !== i.value) i.value = c; }));
+  }
+
+  /* ---------- settling one step-game bet: balance, live stats, effects ---------- */
+  function settle(res, opts = {}) {
+    const b = res.bet;
+    if (!b || b.status !== 'settled' || b._shown) return;
+    b._shown = true;
+    if (b.payout > 0) bal.hidden = Math.max(0, bal.hidden - b.payout);
+    const from = opts.from || $('#g-stage');
+    if (b.payout > 0 && !opts.quiet && from && from.isConnected && !GR.reduced && GR.flyCoins) {
+      GR.flyCoins(from, Math.min(14, 4 + Math.round(b.multiplier * 2))).then(showBal);
+    } else showBal();
+    track(b.amount, b.payout);
+    const st = $('#g-stage');
+    const net = b.payout - b.amount;
+    if (st && net !== 0) { st.classList.remove('fx-win', 'fx-lose'); void st.offsetWidth; st.classList.add(net > 0 ? 'fx-win' : 'fx-lose'); }
+    if (st && b.payout > 0 && b.multiplier >= 10) coins(st, b.multiplier >= 50 ? 44 : 26);
+    autoSettled({ id: b.game, wager: b.amount / 100, payout: b.payout / 100 });
+    myBetsSoon(b.game);
+  }
+
+  /** Gold $ coins raining through a box: used for big wins. */
+  function coins(box, count) {
+    if (!box || GR.reduced) return;
+    const layer = h('<div class="coin-rain"></div>');
+    for (let i = 0; i < (count || 24); i++) {
+      const c = h(coin());
+      const size = 14 + rand() * 16;
+      c.style.cssText = `position:absolute;top:-40px;left:${rand() * 100}%;--cs:${size}px;animation:g-coinFall ${1.1 + rand() * 0.9}s cubic-bezier(.4,0,.9,.6) ${rand() * 0.5}s forwards;--sway:${rand() * 80 - 40}px`;
+      layer.appendChild(c);
+    }
+    box.appendChild(layer);
+    setTimeout(() => layer.remove(), 2700);
+  }
+
+  /** Gold confetti burst inside a positioned container. */
+  function confetti(box, count) {
+    if (!box || GR.reduced) return;
+    const layer = h('<div class="confetti"></div>');
+    const cols = ['#eac837', '#d4b42e', '#fff6c4', '#14f195', '#ffffff'];
+    for (let i = 0; i < (count || 60); i++) {
+      const p = document.createElement('i');
+      const ang = rand() * Math.PI * 2, dist = 120 + rand() * 260;
+      p.style.cssText = `--dx:${Math.cos(ang) * dist}px;--dy:${Math.sin(ang) * dist - 80}px;--r:${rand() * 720 - 360}deg;background:${cols[randInt(cols.length)]};animation-delay:${rand() * 120}ms;width:${6 + rand() * 6}px;height:${8 + rand() * 8}px`;
+      layer.appendChild(p);
+    }
+    box.appendChild(layer);
+    setTimeout(() => layer.remove(), 2200);
+  }
+
+  /** Brief attention pulse, e.g. on the Bet button when a tile is clicked with no round running. */
+  function nudge(el) {
+    if (!el) return;
+    el.classList.remove('nudge');
+    void el.offsetWidth;
+    el.classList.add('nudge');
+    setTimeout(() => el.classList.remove('nudge'), 500);
   }
 
   /* ---------- keyboard shortcuts on game pages ---------- */
@@ -844,76 +830,152 @@
       if (b) b.click();
     }
   });
-  // a mouse click shouldn't leave focus parked on a game button, or Space would press it again
   document.addEventListener('click', (e) => { if (e.detail > 0) { const b = e.target.closest('.bbg .game button'); if (b && document.activeElement === b) b.blur(); } });
-  // keep the bet box's "more than your balance" check current
   let lastBal = null;
   setInterval(() => { const v = me() ? me().balance : null; if (v !== lastBal) { lastBal = v; emit('gg:balance'); } }, 500);
 
   /* =====================================================================
-     Lobby
+     Lobby: rows of tall game cards, live rounds, latest bets
      ===================================================================== */
-  let lobbyCat = 'all';
+  const TIMED_IDS = ['double', 'crash'];
+  let feedTimer = 0, roundTimer = 0;
+
+  const cardHTML = (id, badge) => {
+    const g = games[id];
+    const info = cfg.games.find((x) => x.id === id);
+    const fav = isFav(id);
+    return `<a href="#/games/${id}" class="gc" style="--c1:${g.colors[0]};--c2:${g.colors[1]}" data-id="${id}">
+      <span class="gc-top"><span class="gc-coin">${coin()}</span>${badge ? `<span class="gc-tag ${badge.cls}">${badge.text}</span>` : ''}</span>
+      <span class="gc-fav${fav ? ' on' : ''}" data-fav="${id}" role="button" tabindex="0" aria-label="${fav ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav}">${ic('heart', 16)}</span>
+      <span class="gc-art">${g.art || g.icon}</span>
+      <span class="gc-name">${esc(g.name)}</span>
+      <span class="gc-sub"${TIMED_IDS.includes(id) ? ` data-phase="${id}"` : ''}>${TIMED_IDS.includes(id) ? 'Live rounds' : `RTP ${Number(info ? info.rtp : g.rtp).toFixed(1)}%`}</span>
+    </a>`;
+  };
+
+  /* v._at is when we got the answer: the server's clock moves on from there */
+  const serverNow = (v) => v.now + (Date.now() - v._at);
+  const phaseText = (id, v) => {
+    if (!v || !v.round) return 'Live rounds';
+    const r = v.round;
+    if (r.phase === 'betting') return `Bets open · ${Math.max(0, Math.ceil((r.betEnd - serverNow(v)) / 1000))}s`;
+    if (id === 'crash' && r.phase === 'playing') return `Flying · ${fmtMult(r.mult || 1)}`;
+    if (r.phase === 'playing') return 'Spinning…';
+    return 'Next round soon';
+  };
+
+  function rowsHTML(list) {
+    return list.map(([key, title, ids, opts]) => `<section class="gl-row" data-row="${key}">
+      <header class="gl-row-head">
+        <h2>${title}</h2>
+        <div class="gl-row-tools">
+          <button type="button" class="gl-more" data-more="${key}">View more</button>
+          <button type="button" class="gl-arrow" data-dir="-1" aria-label="Scroll left">${ic('left', 16)}</button>
+          <button type="button" class="gl-arrow" data-dir="1" aria-label="Scroll right">${ic('right', 16)}</button>
+        </div>
+      </header>
+      <div class="gl-track">${ids.map((id) => cardHTML(id, opts && opts.badge ? opts.badge(id) : null)).join('')}</div>
+    </section>`).join('');
+  }
+
   async function lobby() {
     leave();
-    GR.page(GR.skels(6, 220));
+    GR.page(GR.skels(6, 240));
     try { await loadCfg(); } catch (err) { GR.setContent(GR.emptyHTML(err.message, 'fa-triangle-exclamation')); return; }
     const off = !cfg.enabled;
-    GR.setContent(`<div class="bbg-lobby">
-      <div class="gl-hero">
-        <h1>Games</h1>
-        <p>${order.length} originals, played with your real USD balance. Every result is provably fair: you can check any bet yourself.</p>
-        <div class="row" style="justify-content:center;margin-top:16px;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-sm" id="gl-fair"><i class="fa-solid fa-shield-halved"></i> How fairness works</button>
-          <span class="badge b-gold">18+ only</span>
+    const liveBadge = { cls: 'live', text: 'Live' };
+    const rows = [
+      ['originals', 'Originals', order, { badge: (id) => (games[id].badge ? { cls: games[id].badge === 'NEW' ? 'new' : 'hot', text: games[id].badge } : null) }],
+      ['rounds', 'Live rounds', TIMED_IDS, { badge: () => liveBadge }],
+      ['table', 'Table games', order.filter((id) => games[id].cat === 'table')],
+      ['instant', 'Instant win', order.filter((id) => games[id].cat === 'instant')],
+      ['cashout', 'Climb & cash out', order.filter((id) => games[id].cat === 'cashout')],
+    ];
+    if (favs().length) rows.splice(1, 0, ['favs', 'Your favourites', favs().filter((id) => games[id]), {}]);
+    GR.setContent(`<div class="gl">
+      <section class="gl-hero">
+        <div class="gl-hero-copy">
+          <span class="gl-kicker">${ic('bolt', 14)} GoldRush originals</span>
+          <h1>Nineteen games. One balance.</h1>
+          <p>Bet on the house games, watch the table fill up live and cash out before the rocket goes. 18+ only.</p>
         </div>
-        ${off ? '<div class="notice warn mt-16" style="border-radius:14px;justify-content:center"><i class="fa-solid fa-power-off"></i><span>Games are switched off right now.</span></div>' : ''}
-      </div>
+        <div class="gl-hero-live" id="gl-hero-live"></div>
+      </section>
       <div class="gl-tools">
-        <div class="chips" id="gl-cats">
-          <button class="chip ${lobbyCat === 'all' ? 'active' : ''}" data-c="all">All games</button>
-          ${CATS.map(([k, l]) => `<button class="chip ${lobbyCat === k ? 'active' : ''}" data-c="${k}">${l}</button>`).join('')}
-          <button class="chip ${lobbyCat === 'fav' ? 'active' : ''}" data-c="fav"><i class="fa-regular fa-star"></i> Favourites</button>
+        <div class="gl-chips" id="gl-cats">
+          <button class="chip on" data-c="all">All games</button>
+          ${CATS.map(([k, l]) => `<button class="chip" data-c="${k}">${l}</button>`).join('')}
+          <button class="chip" data-c="fav">${ic('heart', 14)} Favourites</button>
         </div>
-        <label class="gl-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" id="gl-q" placeholder="Search games" autocomplete="off" aria-label="Search games"></label>
+        <label class="gl-search">${ic('search', 16)}<input type="search" id="gl-q" placeholder="Search games" autocomplete="off" aria-label="Search games"></label>
       </div>
-      <div class="gl-grid" id="gl-grid"></div>
-      <div class="gl-live">
-        <div class="sec-title"><i class="fa-solid fa-bolt"></i> Live bets</div>
-        <div id="gl-live">${GR.skels(1, 160)}</div>
-      </div>
+      ${off ? '<div class="gl-off">Games are switched off right now.</div>' : ''}
+      <div id="gl-rows">${rowsHTML(rows)}</div>
+      <div class="gl-grid" id="gl-grid" hidden></div>
+      <section class="gl-sec">
+        <div class="gl-row-head"><h2>${ic('live', 18)} Latest bets</h2><span class="gl-note">Live across every game</span></div>
+        <div id="gl-live" class="feed-wrap"><div class="feed-empty">Loading…</div></div>
+      </section>
     </div>`);
-    const paint = () => {
+
+    const grid = () => $('#gl-grid');
+    const filterGrid = (key) => {
       const q = ($('#gl-q').value || '').trim().toLowerCase();
       const f = favs();
-      const list = order.filter((id) => {
+      return order.filter((id) => {
         const g = games[id];
-        if (lobbyCat === 'fav' && !f.includes(id)) return false;
-        if (lobbyCat !== 'all' && lobbyCat !== 'fav' && g.cat !== lobbyCat) return false;
+        if (key === 'fav' && !f.includes(id)) return false;
+        if (key !== 'all' && key !== 'fav' && g.cat !== key) return false;
         return !q || g.name.toLowerCase().includes(q);
       });
-      $('#gl-grid').innerHTML = list.length ? list.map((id) => {
-        const g = games[id];
-        const info = cfg.games.find((x) => x.id === id);
-        return `<a href="#/games/${id}" class="gl-tile" style="--c1:${g.colors[0]};--c2:${g.colors[1]}" data-reveal>
-          ${g.badge ? `<span class="gl-flag ${g.badge === 'NEW' ? 'new' : ''}">${g.badge}</span>` : ''}
-          <span class="gl-art">${g.art || ''}</span>
-          <span class="gl-name"><b>${esc(g.name)}</b><small>RTP ${Number(info ? info.rtp : g.rtp).toFixed(1)}%</small></span>
-        </a>`;
-      }).join('') : `<div class="gl-empty">${GR.emptyHTML(lobbyCat === 'fav' ? 'No favourites yet. Tap the star under any game.' : 'No games match that.', 'fa-dice')}</div>`;
-      GR.reveal($('#gl-grid'));
+    };
+    /* the chips filter the grid; with no chip and no search the rows show */
+    const apply = () => {
+      const q = ($('#gl-q').value || '').trim();
+      const chip = $('#gl-cats .chip.on').dataset.c;
+      const filtered = chip !== 'all' || q;
+      $('#gl-rows').hidden = !!filtered;
+      grid().hidden = !filtered;
+      if (filtered) {
+        const ids = filterGrid(chip);
+        grid().innerHTML = ids.length ? ids.map((id) => cardHTML(id, null)).join('') : `<div class="gl-empty">${GR.emptyHTML(chip === 'fav' ? 'No favourites yet. Tap the heart on any game.' : 'No games match that.', 'fa-dice')}</div>`;
+      }
     };
     $('#gl-cats').addEventListener('click', (e) => {
       const b = e.target.closest('[data-c]');
       if (!b) return;
-      lobbyCat = b.dataset.c;
-      $$('#gl-cats .chip').forEach((x) => x.classList.toggle('active', x === b));
-      paint();
+      $$('#gl-cats .chip').forEach((x) => x.classList.toggle('on', x === b));
+      apply();
     });
-    $('#gl-q').addEventListener('input', paint);
-    $('#gl-fair').addEventListener('click', () => openFair());
-    paint();
+    $('#gl-q').addEventListener('input', apply);
+
+    $('.gl').addEventListener('click', (e) => {
+      const fav = e.target.closest('[data-fav]');
+      if (fav) {
+        e.preventDefault();
+        const on = toggleFav(fav.dataset.fav);
+        fav.classList.toggle('on', on);
+        fav.setAttribute('aria-pressed', on);
+        return;
+      }
+      const arrow = e.target.closest('.gl-arrow');
+      if (arrow) {
+        const track = arrow.closest('.gl-row').querySelector('.gl-track');
+        track.scrollBy({ left: Number(arrow.dataset.dir) * track.clientWidth * 0.8, behavior: 'smooth' });
+        return;
+      }
+      const more = e.target.closest('[data-more]');
+      if (more) {
+        const row = more.closest('.gl-row');
+        row.classList.toggle('open');
+        more.textContent = row.classList.contains('open') ? 'Show less' : 'View more';
+      }
+    });
+    onLeave(() => { clearInterval(feedTimer); clearInterval(roundTimer); });
     paintLobbyLive();
+    feedTimer = setInterval(paintLobbyLive, 6000);
+    paintRoundTiles();
+    roundTimer = setInterval(paintRoundTiles, 1000);
   }
 
   async function paintLobbyLive() {
@@ -922,21 +984,39 @@
     try {
       const { bets } = await GR.api('/games/live');
       if (!$('#gl-live')) return;
-      el.innerHTML = bets.length ? `<div class="table-wrap"><table><thead><tr><th>Game</th><th>Player</th><th>Bet</th><th>Multiplier</th><th style="text-align:right">Payout</th></tr></thead><tbody>
-        ${bets.map((b) => {
-          const g = games[b.game];
-          return `<tr><td><a href="#/games/${esc(b.game)}" class="row" style="gap:8px"><i class="gi" style="display:inline-block;width:18px;height:18px;color:var(--gold)">${g ? g.icon : ''}</i><b>${esc(b.name)}</b></a></td>
-          <td>${GR.avatar(b.username, b.avatar_color)} ${esc(b.username)}</td><td class="money">${GR.money(b.amount)}</td>
-          <td><span class="badge ${b.payout > b.amount ? 'b-green' : 'b-gray'}">${fmtMult(b.multiplier)}</span></td>
-          <td style="text-align:right" class="money ${b.payout > b.amount ? 'green' : ''}">${GR.money(b.payout)}</td></tr>`;
-        }).join('')}</tbody></table></div>` : GR.emptyHTML('No bets yet. Be the first!', 'fa-dice');
-    } catch { el.innerHTML = ''; }
+      el.innerHTML = feedTable(bets.map((b) => ({ name: games[b.game] ? games[b.game].name : b.name, icon: games[b.game] ? games[b.game].icon : '', who: b.username, color: b.avatar_color, amount: b.amount, payout: b.payout, mult: b.multiplier, status: 'settled' })),
+        ['game', 'player', 'bet', 'mult', 'payout'], 'No bets yet. Be the first.');
+    } catch { /* try again soon */ }
+  }
+
+  /** The two timed games: their phase in the hero and on their cards, refreshed every second. */
+  const roundViews = {};
+  async function paintRoundTiles() {
+    const hero = $('#gl-hero-live');
+    if (!hero) return;
+    for (const id of TIMED_IDS) {
+      try { roundViews[id] = { ...(await GR.api(`/games/rounds/${id}`)), _at: Date.now() }; } catch { /* keep the last */ }
+      const v = roundViews[id];
+      const sub = $(`[data-phase="${id}"]`);
+      if (sub && v) sub.textContent = phaseText(id, v);
+    }
+    hero.innerHTML = TIMED_IDS.map((id) => {
+      const g = games[id], v = roundViews[id];
+      const bets = v ? v.bets.length : 0;
+      return `<a href="#/games/${id}" class="gl-live-card" style="--c1:${g.colors[0]};--c2:${g.colors[1]}">
+        <span class="gl-live-tag">${ic('live', 12)} Live</span>
+        <span class="gl-live-name">${esc(g.name)}</span>
+        <span class="gl-live-phase">${v ? esc(phaseText(id, v)) : 'Connecting…'}</span>
+        <span class="gl-live-meta">${bets} bet${bets === 1 ? '' : 's'} this round</span>
+      </a>`;
+    }).join('');
   }
 
   /* ---------- exports ---------- */
   window.GG = {
-    $, $$, h, esc, fmt, fmtMult, round2, clamp, sleep, rand, randInt, frame, unframe, coin, sfx, tension, cents,
+    $, $$, h, esc, fmt, fmtMult, round2, clamp, sleep, rand, randInt, frame, unframe, coin, sfx, tension, cents, money,
     registerGame, games, order, onLeave, placeBet, bet, act, active, settle, balance, coins, confetti, nudge,
+    follow, roundBet, roundCashout, syncMe, feedTable, chipStack, chipButtons, chipLabel, CHIPS, track,
     toast: GR.toast, ui: { amount: amountField, seg: segHTML, bindSeg, setSeg }, cards, prefs,
     me, cfg: () => cfg, minBet, maxBet,
   };

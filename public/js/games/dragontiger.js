@@ -93,7 +93,6 @@
         <div class="gfield"><span class="gfield-l">Bet on</span>${GG.ui.seg('dt-side', [['dragon', 'Dragon'], ['tie', 'Tie'], ['tiger', 'Tiger']], side)}</div>
         <div class="gfield"><span class="gfield-l">Profit on win</span><div class="readout">${GG.coin()}<span id="dt-profit">0.00</span></div></div>
         <button class="gbtn primary lg block" id="dt-deal">Deal</button>
-        <p class="panel-note">One card each, highest card wins: ace is low, king is high. Dragon and Tiger pay 1 to 1 and hand back half your bet on a tie. Tie pays 11 to 1.</p>
       </div>`));
       const spot = (k) => `<button class="dt-spot ${k}" data-v="${k}"><b>${SIDES[k].label}</b><small>${SIDES[k].odds}</small></button>`;
       stage.appendChild(h(`<div class="dt-table">

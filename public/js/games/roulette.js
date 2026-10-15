@@ -8,7 +8,6 @@
   const REDS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
   const SEG = 360 / 37;
   const SPIN_MS = 6000, DROP_AT = 3900;
-  const CHIPS = [[0.1, '#56688f'], [0.5, '#22a268'], [1, '#2d7be0'], [5, '#8f55e0'], [25, '#e0832a'], [100, '#dc3350']]; // dollars
   const colorOf = (n) => (n === 0 ? 'green' : REDS.has(n) ? 'red' : 'black');
 
   let bets = {}, undo = [], chip = 1, spinning = false, alive = 0, ballRot = 0, ticks = [];
@@ -16,7 +15,6 @@
 
   const sum = () => round2(Object.values(bets).reduce((a, b) => a + b, 0));
   /** Chip labels in dollars: 10¢, 50¢, 1, 25, 1.5k */
-  const short = (n) => (n < 1 ? Math.round(n * 100) + '¢' : n >= 1000 ? (n / 1000).toFixed(n % 1000 ? 1 : 0) + 'k' : String(Number.isInteger(n) ? n : Number(n.toFixed(2))));
 
   function drawWheel(cv) {
     const S = 340, dpr = Math.min(2, window.devicePixelRatio || 1), cx = S / 2, cy = S / 2, seg = (Math.PI * 2) / 37;
@@ -68,13 +66,16 @@
     return cells;
   }
 
+  /* Each spot shows its chips as a stack. Only spots that changed are redrawn, so the new chip can pop. */
   function paintBets() {
     $$('.rl-cell').forEach((cell) => {
-      const v = bets[cell.dataset.k];
-      let b = $('.rl-chip', cell);
-      if (!v) { if (b) b.remove(); return; }
-      if (!b) { b = h('<span class="rl-chip"></span>'); cell.appendChild(b); }
-      b.textContent = short(v);
+      const v = bets[cell.dataset.k] || 0;
+      if (cell.dataset.v === String(v)) return;
+      cell.dataset.v = String(v);
+      const old = $('.chipstack', cell);
+      if (!v) { if (old) old.remove(); return; }
+      if (old) old.remove();
+      cell.insertAdjacentHTML('beforeend', GG.chipStack(v));
     });
     $('#rl-total').textContent = fmt(sum());
   }
@@ -195,7 +196,7 @@
       panel.appendChild(h(`<div>
         <div class="gfield">
           <span class="gfield-l">Chip value</span>
-          <div class="rl-chips">${CHIPS.map(([v, c]) => `<button class="chipbtn${v === chip ? ' on' : ''}" data-v="${v}" style="--cc:${c}">${short(v)}</button>`).join('')}</div>
+          <div class="rl-chips">${GG.chipButtons(chip)}</div>
         </div>
         <div class="gfield">
           <span class="gfield-l">Total bet</span>
@@ -206,7 +207,6 @@
           <button class="gbtn ghost" id="rl-undo">Undo</button>
           <button class="gbtn ghost" id="rl-clear">Clear</button>
         </div>
-        <p class="panel-note">Pick a chip, then click the table to stack bets. Right-click a spot to take its chips back. Bets stay down after each spin.</p>
       </div>`));
 
       stage.classList.add('rl-stage');

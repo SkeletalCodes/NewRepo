@@ -84,7 +84,6 @@
         <div class="gfield"><span class="gfield-l">Risk</span>${GG.ui.seg('dc-risk', RISK, riskOf())}</div>
         <div class="gfield"><span class="gfield-l">Profit on win</span><div class="readout">${GG.coin()}<span id="dc-profit">0.00</span></div></div>
         <button class="gbtn primary lg block" id="dc-roll">Roll dice</button>
-        <p class="panel-note">Pick a risk level or drag the slider to set your own target. Low wins three rolls in four; Extreme wins one in fifty and pays 49.5×. Tap the target box to flip between rolling under and over.</p>
       </div>`));
       stage.appendChild(h(`<div class="dc-wrap">
         <div class="history" id="dc-hist"></div>

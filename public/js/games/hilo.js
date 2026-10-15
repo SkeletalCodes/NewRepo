@@ -219,7 +219,6 @@
         </div>
         <button class="gbtn primary lg block" id="hl-btn">Bet</button>
         <button class="gbtn ghost block" id="hl-skip" style="margin-top:10px" disabled>Skip card <kbd class="kb">→</kbd></button>
-        <p class="panel-note">Ace is the lowest card and King the highest. Safe calls add a little, long shots add a lot — the number on each button is what you could cash out for if that call lands. Skipping swaps the card for free. One wrong call loses the bet.</p>
       </div>`));
       stage.appendChild(h(`<div class="hl-wrap">
         <div class="hl-head">

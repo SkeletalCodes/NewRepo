@@ -8,6 +8,8 @@
 
   const N = 40, DRAWS = 10, MAX_PICKS = 10;
   const TENSION_AT = 5; // hits needed before the slow-down starts
+  /* A gem that pops onto a tile when a drawn number is one of your picks. */
+  const GEM = '<span class="kn-gem" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M24 5L43 19L24 44L5 19Z" fill="#14f195"/><path d="M24 5L33 19H15Z" fill="#fff" opacity=".55"/><path d="M5 19H15L24 44Z" fill="#000" opacity=".22"/><path d="M43 19H33L24 44Z" fill="#000" opacity=".32"/></svg><i></i><i></i><i></i></span>';
 
   /* Multiplier by [risk][picks][hits]. Every row returns ~99% (checked against the hypergeometric odds). */
   const PAY = {
@@ -55,6 +57,7 @@
 
   function clearMarks() {
     $$('.kn-tile').forEach((t) => t.classList.remove('hit', 'miss', 'scan', 'lock', 'faded'));
+    $$('.kn-gem').forEach((g) => g.remove());
     $$('#kn-dots i').forEach((d) => { d.className = ''; });
     $('#kn-res').className = 'result-pop';
     hits = 0; showHits = false;
@@ -137,6 +140,7 @@
       el.classList.add(isHit ? 'hit' : 'miss');
       dots[i].className = isHit ? 'hit' : 'miss';
       if (isHit) {
+        el.insertAdjacentHTML('beforeend', GEM);
         hits++;
         GG.sfx('kenoHit', hits);
         if (tense) { GG.sfx('impact'); stageEl.classList.remove('flash'); void stageEl.offsetWidth; stageEl.classList.add('flash'); }
@@ -197,7 +201,6 @@
           <button class="gbtn ghost" id="kn-clear">Clear</button>
         </div>
         <button class="gbtn primary lg block" id="kn-bet">Bet</button>
-        <p class="panel-note">Pick up to 10 numbers, then 10 are drawn. Land 5 hits with more to come and the draw slows right down — every tile after that takes longer than the last.</p>
       </div>`));
 
       let tiles = '', dots = '';
