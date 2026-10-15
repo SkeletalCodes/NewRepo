@@ -5,7 +5,9 @@
   const { $, $$, h, fmt, fmtMult, randInt } = GG;
 
   const N = 25;
-  const GEM = '<svg viewBox="0 0 48 48"><path d="M24 5L43 19L24 44L5 19Z" fill="#14f195"/><path d="M24 5L33 19H15Z" fill="#a5f7cf"/><path d="M5 19H15L24 44Z" fill="#1fb96d"/><path d="M43 19H33L24 44Z" fill="#149454"/><path d="M15 19H33L24 44Z" fill="#3df29a"/><path d="M5 19L24 5L15 19Z" fill="#5cf0ac"/><path d="M43 19L24 5L33 19Z" fill="#22c479"/></svg>';
+  const GEM_FLAT = '<svg viewBox="0 0 48 48"><path d="M24 5L43 19L24 44L5 19Z" fill="#14f195"/><path d="M24 5L33 19H15Z" fill="#a5f7cf"/><path d="M5 19H15L24 44Z" fill="#1fb96d"/><path d="M43 19H33L24 44Z" fill="#149454"/><path d="M15 19H33L24 44Z" fill="#3df29a"/><path d="M5 19L24 5L15 19Z" fill="#5cf0ac"/><path d="M43 19L24 5L33 19Z" fill="#22c479"/></svg>';
+  /* the faceted emerald from the sprite in index.html; the flat one above is only for the lobby art */
+  const GEM = '<svg class="gem-svg" viewBox="0 0 64 64" aria-hidden="true"><use href="#gr-gem"/></svg>';
   const BOMB = '<svg viewBox="0 0 48 48"><path d="M31 15l5-6" stroke="#b9c0d1" stroke-width="4" stroke-linecap="round"/><path d="M38 7l2.500-4M39 8l5-1.500M36.500 6l-1-4.500" stroke="#eac837" stroke-width="2.600" stroke-linecap="round"/><circle cx="22" cy="28" r="15.500" fill="#161922"/><circle cx="22" cy="28" r="13" fill="#2a2f3d"/><ellipse cx="16.500" cy="22" rx="4.500" ry="3" fill="#fff" opacity=".28" transform="rotate(-35 16.500 22)"/></svg>';
 
   const RISK = [[3, 'Low'], [5, 'Medium'], [10, 'High'], [20, 'Extreme']]; // mine-count presets
@@ -181,7 +183,7 @@
     colors: ['#2f86ee', '#0b1f45'],
     icon: '<svg viewBox="0 0 24 24"><path d="M12 3l8.500 6.500L12 21 3.500 9.500z" fill="currentColor"/></svg>',
     art: `<svg viewBox="0 0 200 200">
-      <g transform="translate(22 30) scale(2.500)">${GEM.replace(/<\/?svg[^>]*>/g, '')}</g>
+      <g transform="translate(22 30) scale(2.500)">${GEM_FLAT.replace(/<\/?svg[^>]*>/g, '')}</g>
       <g transform="translate(96 92) scale(2)">${BOMB.replace(/<\/?svg[^>]*>/g, '')}</g>
     </svg>`,
 

@@ -14,42 +14,82 @@
   const history = [];
 
   const sum = () => round2(Object.values(bets).reduce((a, b) => a + b, 0));
-  /** Chip labels in dollars: 10¢, 50¢, 1, 25, 1.5k */
 
+  /* A casino wheel: wooden rim, ball track with deflectors, number ring, pocket ring with metal frets,
+     wooden cone and a silver turret. Pocket i is centred i * SEG clockwise from the top, where the ball
+     lands (it rests 100px from the centre and rolls on the track at 143px). */
   function drawWheel(cv) {
-    const S = 340, dpr = Math.min(2, window.devicePixelRatio || 1), cx = S / 2, cy = S / 2, seg = (Math.PI * 2) / 37;
+    const S = 340, dpr = Math.min(2, window.devicePixelRatio || 1), cx = S / 2, cy = S / 2, seg = (Math.PI * 2) / 37, TAU = Math.PI * 2;
     cv.width = S * dpr; cv.height = S * dpr;
     const c = cv.getContext('2d');
     c.scale(dpr, dpr);
-    let g = c.createRadialGradient(cx, cy, 138, cx, cy, 170);
-    g.addColorStop(0, '#5c3f17'); g.addColorStop(.55, '#e2bd66'); g.addColorStop(1, '#7a5520');
-    c.fillStyle = g; c.beginPath(); c.arc(cx, cy, 170, 0, 7); c.fill();
-    c.fillStyle = '#120c05'; c.beginPath(); c.arc(cx, cy, 153, 0, 7); c.fill();
-    g = c.createRadialGradient(cx, cy, 137, cx, cy, 152);
-    g.addColorStop(0, '#3a2a14'); g.addColorStop(1, '#1f1609');
-    c.fillStyle = g; c.beginPath(); c.arc(cx, cy, 151, 0, 7); c.fill();
+    const radial = (r0, r1, stops, ox = 0, oy = 0) => {
+      const g = c.createRadialGradient(cx + ox, cy + oy, r0, cx, cy, r1);
+      stops.forEach(([o, col]) => g.addColorStop(o, col));
+      return g;
+    };
+    const disc = (r, fill) => { c.beginPath(); c.arc(cx, cy, r, 0, TAU); c.fillStyle = fill; c.fill(); };
+    const ring = (r0, r1, fill) => { c.beginPath(); c.arc(cx, cy, r1, 0, TAU); c.arc(cx, cy, r0, 0, TAU, true); c.fillStyle = fill; c.fill(); };
+    const circle = (r, stroke, w) => { c.beginPath(); c.arc(cx, cy, r, 0, TAU); c.strokeStyle = stroke; c.lineWidth = w; c.stroke(); };
+    const spoke = (a, r0, r1) => { c.beginPath(); c.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); c.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); c.stroke(); };
+    const metal = (x0, y0, x1, y1) => {
+      const g = c.createLinearGradient(x0, y0, x1, y1);
+      g.addColorStop(0, '#f6f8fc'); g.addColorStop(.5, '#a3abbb'); g.addColorStop(1, '#e4e8f0');
+      return g;
+    };
+
+    // wooden rim with gold edges
+    disc(170, radial(148, 170, [[0, '#3a1d08'], [.45, '#7e461b'], [.8, '#5a2e10'], [1, '#2b1405']]));
+    circle(169, '#e9c46a', 2);
+    circle(158.5, '#c99a3c', 1.5);
+    // the ball track: dark polished wood, lighter towards the rim, with eight diamond deflectors
+    ring(132, 158, radial(132, 158, [[0, '#110904'], [.7, '#2a170a'], [1, '#41240f']]));
+    c.fillStyle = '#e8c56d';
+    for (let k = 0; k < 8; k++) {
+      const a = (k * Math.PI) / 4 + Math.PI / 8;
+      c.save(); c.translate(cx + Math.cos(a) * 146, cy + Math.sin(a) * 146); c.rotate(a);
+      c.beginPath(); c.moveTo(-7, 0); c.lineTo(0, -3.2); c.lineTo(7, 0); c.lineTo(0, 3.2); c.closePath(); c.fill();
+      c.restore();
+    }
+    // number ring (outer) and pocket ring (inner, deeper colour)
+    const colours = (n) => (n === 0 ? ['#14a35d', '#0b7340'] : REDS.has(n) ? ['#cc1f3a', '#8c0f24'] : ['#1b1e27', '#0c0d12']);
     for (let i = 0; i < 37; i++) {
-      const a0 = -Math.PI / 2 + (i - .5) * seg;
-      c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, 137, a0, a0 + seg); c.closePath();
-      c.fillStyle = ORDER[i] === 0 ? '#1fae6a' : REDS.has(ORDER[i]) ? '#d02c47' : '#191c26';
-      c.fill();
-      c.strokeStyle = 'rgba(231,196,102,.6)'; c.lineWidth = 1; c.stroke();
+      const a0 = -Math.PI / 2 + (i - 0.5) * seg, a1 = a0 + seg;
+      const [face, deep] = colours(ORDER[i]);
+      c.beginPath(); c.arc(cx, cy, 132, a0, a1); c.arc(cx, cy, 108, a1, a0, true); c.closePath(); c.fillStyle = face; c.fill();
+      c.beginPath(); c.arc(cx, cy, 108, a0, a1); c.arc(cx, cy, 86, a1, a0, true); c.closePath(); c.fillStyle = deep; c.fill();
     }
-    c.fillStyle = '#fff'; c.font = '700 13px Outfit, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    for (let i = 0; i < 37; i++) {
-      c.save(); c.translate(cx, cy); c.rotate(i * seg); c.fillText(String(ORDER[i]), 0, -122); c.restore();
+    ring(86, 108, radial(86, 108, [[0, 'rgba(0, 0, 0, .5)'], [1, 'rgba(0, 0, 0, 0)']]));
+    c.strokeStyle = 'rgba(233, 196, 106, .5)'; c.lineWidth = 1;
+    for (let i = 0; i < 37; i++) spoke(-Math.PI / 2 + (i - 0.5) * seg, 108, 132);
+    c.strokeStyle = '#dfe3ec'; c.lineWidth = 1.6;
+    for (let i = 0; i < 37; i++) spoke(-Math.PI / 2 + (i - 0.5) * seg, 86, 108);
+    circle(132, '#e9c46a', 2);
+    circle(108, '#cfd4de', 2);
+    circle(86, '#cfd4de', 2.5);
+    // the numbers read outwards, like a real wheel
+    c.fillStyle = '#fff'; c.font = '800 12.5px Inter, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (let i = 0; i < 37; i++) { c.save(); c.translate(cx, cy); c.rotate(i * seg); c.fillText(String(ORDER[i]), 0, -120); c.restore(); }
+    // wooden cone
+    disc(85, radial(4, 85, [[0, '#d0955a'], [.35, '#9c5c28'], [.75, '#6b3816'], [1, '#3e1f0a']], -18, -22));
+    circle(72, 'rgba(255, 220, 160, .08)', 1);
+    circle(58, 'rgba(255, 220, 160, .08)', 1);
+    circle(85, '#e9c46a', 1.5);
+    // silver turret: four arms with knobs, and a centre cap
+    c.lineCap = 'round';
+    for (let k = 0; k < 4; k++) {
+      const a = (k * Math.PI) / 2 + Math.PI / 4;
+      const x = cx + Math.cos(a) * 46, y = cy + Math.sin(a) * 46;
+      c.strokeStyle = 'rgba(0, 0, 0, .35)'; c.lineWidth = 8; c.beginPath(); c.moveTo(cx + 2, cy + 3); c.lineTo(x + 2, y + 3); c.stroke();
+      c.strokeStyle = metal(cx, cy, x, y); c.lineWidth = 6; c.beginPath(); c.moveTo(cx, cy); c.lineTo(x, y); c.stroke();
+      c.fillStyle = metal(x - 6, y - 6, x + 6, y + 6); c.beginPath(); c.arc(x, y, 6.5, 0, TAU); c.fill();
     }
-    c.strokeStyle = 'rgba(231,196,102,.55)'; c.lineWidth = 1.5; c.beginPath(); c.arc(cx, cy, 108, 0, 7); c.stroke();
-    c.fillStyle = 'rgba(0,0,0,.28)'; c.beginPath(); c.arc(cx, cy, 108, 0, 7); c.arc(cx, cy, 90, 0, 7, true); c.fill();
-    g = c.createRadialGradient(cx - 24, cy - 24, 8, cx, cy, 92);
-    g.addColorStop(0, '#6a4a1c'); g.addColorStop(1, '#1f1407');
-    c.fillStyle = g; c.beginPath(); c.arc(cx, cy, 90, 0, 7); c.fill();
-    c.strokeStyle = '#d9b25a'; c.lineWidth = 3; c.beginPath(); c.arc(cx, cy, 90, 0, 7); c.stroke();
-    c.strokeStyle = 'rgba(217,178,90,.5)'; c.lineWidth = 5; c.lineCap = 'round';
-    for (let i = 0; i < 4; i++) {
-      const a = (i * Math.PI) / 2 + Math.PI / 4;
-      c.beginPath(); c.moveTo(cx + Math.cos(a) * 54, cy + Math.sin(a) * 54); c.lineTo(cx + Math.cos(a) * 82, cy + Math.sin(a) * 82); c.stroke();
-    }
+    c.lineCap = 'butt';
+    c.fillStyle = 'rgba(0, 0, 0, .35)'; c.beginPath(); c.arc(cx + 2, cy + 3, 15, 0, TAU); c.fill();
+    c.fillStyle = metal(cx - 14, cy - 14, cx + 14, cy + 14); c.beginPath(); c.arc(cx, cy, 14, 0, TAU); c.fill();
+    c.fillStyle = 'rgba(255, 255, 255, .7)'; c.beginPath(); c.arc(cx - 4, cy - 5, 4, 0, TAU); c.fill();
+    // a soft gloss over the whole wheel
+    disc(170, radial(0, 170, [[0, 'rgba(255, 255, 255, .1)'], [.6, 'rgba(255, 255, 255, .02)'], [1, 'rgba(255, 255, 255, 0)']], -70, -90));
   }
 
   function boardHTML() {

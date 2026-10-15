@@ -9,7 +9,7 @@
   const N = 40, DRAWS = 10, MAX_PICKS = 10;
   const TENSION_AT = 5; // hits needed before the slow-down starts
   /* A gem that pops onto a tile when a drawn number is one of your picks. */
-  const GEM = '<span class="kn-gem" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M24 5L43 19L24 44L5 19Z" fill="#14f195"/><path d="M24 5L33 19H15Z" fill="#fff" opacity=".55"/><path d="M5 19H15L24 44Z" fill="#000" opacity=".22"/><path d="M43 19H33L24 44Z" fill="#000" opacity=".32"/></svg><i></i><i></i><i></i></span>';
+  const GEM = '<span class="kn-gem" aria-hidden="true"><svg viewBox="0 0 64 64"><use href="#gr-gem-violet"/></svg><i></i><i></i><i></i></span>';
 
   /* Multiplier by [risk][picks][hits]. Every row returns ~99% (checked against the hypergeometric odds). */
   const PAY = {

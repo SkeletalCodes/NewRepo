@@ -99,7 +99,7 @@ The sidebar's **Games** section has 19 games, all played with the user's real US
 | Endpoint | |
 |---|---|
 | `GET /api/games/config` | Limits, pay tables, and which games are timed rounds |
-| `GET /api/games/live?game=&page=` | Settled bets from all players, a page at a time |
+| `GET /api/games/live?game=&page=&view=` | Settled bets from all players, newest first, a page at a time. `view=big` lists this week's biggest wins instead |
 | `GET /api/games/rounds/:game` | Double or Crash: the current round, its timers, everyone's bets and the last results |
 | `POST /api/games/rounds/:game/bet` | `{ amount (cents), params }` during the betting window. Double: `{ side: red · black · green }`. Crash: `{ auto }` |
 | `POST /api/games/rounds/crash/cashout` | Cash out your open Crash bet |

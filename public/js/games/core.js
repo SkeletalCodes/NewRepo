@@ -446,7 +446,7 @@
       while (left + 1e-9 >= v && discs.length < 5) { discs.push(c); left = round2(left - v); }
     }
     if (!discs.length) discs.push(CHIPS[0][1]);
-    return `<span class="chipstack" aria-label="${chipLabel(dollars)}">${discs.map((c, i) => `<i class="disc" style="--cc:${c};--i:${i}"></i>`).join('')}<b>${chipLabel(dollars)}</b></span>`;
+    return `<span class="chipstack" style="--n:${discs.length}" aria-label="${chipLabel(dollars)}">${discs.map((c, i) => `<i class="disc" style="--cc:${c};--i:${i}"></i>`).join('')}<b>${chipLabel(dollars)}</b></span>`;
   }
   const chipButtons = (selected) => CHIPS.map(([v, c]) => `<button type="button" class="chipbtn${v === selected ? ' on' : ''}" data-v="${v}" style="--cc:${c}" aria-label="Chip ${chipLabel(v)}"><b>${chipLabel(v)}</b></button>`).join('');
 
@@ -456,13 +456,21 @@
    * rows: { game?, name?, who, color?, side?, amount (cents), payout (cents), mult, mine, status }
    * cols: any of 'game', 'player', 'side', 'bet', 'mult', 'payout'
    */
+  /** How long ago a bet settled, short: now, 12s, 4m, 2h, 3d. */
+  const ago = (t) => {
+    if (!t) return '';
+    const s = Math.max(0, Math.round((Date.now() - Number(t)) / 1000));
+    return s < 5 ? 'now' : s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
+  };
+
   function feedTable(rows, cols = ['game', 'player', 'bet', 'mult', 'payout'], empty = 'No bets yet.') {
     if (!rows.length) return `<div class="feed-empty">${esc(empty)}</div>`;
-    const head = { game: 'Game', player: 'Player', side: 'Side', bet: 'Bet', mult: 'Multiplier', payout: 'Payout' };
+    const head = { game: 'Game', player: 'Player', time: 'Time', side: 'Side', bet: 'Bet', mult: '<span class="hl">Multiplier</span><span class="hs">Multi</span>', payout: 'Profit' };
     const cell = (c, r) => {
       if (c === 'game') return `<span class="fc-game">${r.icon ? `<i class="fi">${r.icon}</i>` : ''}<b>${esc(r.name || '')}</b>${r.open ? '<em class="open-tag">open</em>' : ''}</span>`;
       if (c === 'player') return `<span class="fc-player">${who(r.who, r.color)}</span>`;
       if (c === 'side') return `<span class="fc-side ${r.side || ''}">${esc(r.sideLabel || r.side || '')}</span>`;
+      if (c === 'time') return `<span class="fc-time">${ago(r.at)}</span>`;
       if (c === 'bet') return `<span class="fc-bet">${coin('sm')}${fmt(r.amount / 100)}</span>`;
       if (c === 'mult') return `<span class="fc-mult ${r.mult > 1 ? 'hi' : r.mult > 0 ? '' : 'zero'}">${r.status === 'active' ? '<em class="live-dot"></em>live' : fmtMult(r.mult || 0)}</span>`;
       if (c === 'payout') {
@@ -474,7 +482,7 @@
     };
     return `<div class="feed${cols.includes('side') ? ' feed-side' : ''}" role="table">
       <div class="feed-row feed-head" role="row">${cols.map((c) => `<span role="columnheader">${head[c]}</span>`).join('')}</div>
-      ${rows.map((r) => `<div class="feed-row${r.mine ? ' mine' : ''}" role="row">${cols.map((c) => `<span role="cell">${cell(c, r)}</span>`).join('')}</div>`).join('')}
+      ${rows.map((r) => `<div class="feed-row${r.mine ? ' mine' : ''}${r.fresh ? ' fresh' : ''}" role="row">${cols.map((c) => `<span role="cell">${cell(c, r)}</span>`).join('')}</div>`).join('')}
     </div>`;
   }
 
@@ -840,16 +848,32 @@
   const TIMED_IDS = ['double', 'crash'];
   let feedTimer = 0, roundTimer = 0;
 
+  /* Card colour pair and background pattern for each game: bright tiles like a slot lobby. */
+  const CARD = {
+    blackjack: ['#7d828f', '#2c2f38', 'spot'], baccarat: ['#2fb34f', '#0b6626', 'felt'], roulette: ['#33b954', '#0d682a', 'felt'],
+    hilo: ['#ffb620', '#ec6a10', 'rays'], keno: ['#3dc552', '#0e7a2b', 'tiles'], dice: ['#ff4593', '#c40c58', 'dots'],
+    limbo: ['#ff7d24', '#d8360c', 'rings'], plinko: ['#3f7fff', '#1540c2', 'dots'], wheel: ['#24b8ff', '#0a61cd', 'rays'],
+    diamonds: ['#a852ff', '#5512cc', 'rays'], double: ['#ff4f58', '#a30f28', 'diag'], coinflip: ['#ffca2a', '#de7600', 'rays'],
+    crash: ['#ffd02e', '#2a55ff', 'split'], mines: ['#347fff', '#113cb0', 'tiles'], towers: ['#ff9649', '#b9390a', 'tiles'],
+    pump: ['#ff5e83', '#be1646', 'dots'], videopoker: ['#ff4f8e', '#cc185a', 'suits'], cases: ['#9160ff', '#4818a3', 'rays'],
+    dragontiger: ['#ff6040', '#a51d15', 'felt'],
+  };
+
   const cardHTML = (id, badge) => {
     const g = games[id];
     const info = cfg.games.find((x) => x.id === id);
     const fav = isFav(id);
-    return `<a href="#/games/${id}" class="gc" style="--c1:${g.colors[0]};--c2:${g.colors[1]}" data-id="${id}">
+    const [c1, c2, pat] = CARD[id] || [g.colors[0], g.colors[1], 'rays'];
+    const timed = TIMED_IDS.includes(id);
+    const about = timed ? 'Live rounds' : `RTP ${Number(info ? info.rtp : g.rtp).toFixed(1)}%`;
+    return `<a href="#/games/${id}" class="gc" style="--c1:${c1};--c2:${c2}" data-id="${id}" data-pat="${pat}" title="${esc(g.name)} · ${about}">
+      <span class="gc-bg" aria-hidden="true"></span>
       <span class="gc-top"><span class="gc-coin">${coin()}</span>${badge ? `<span class="gc-tag ${badge.cls}">${badge.text}</span>` : ''}</span>
-      <span class="gc-fav${fav ? ' on' : ''}" data-fav="${id}" role="button" tabindex="0" aria-label="${fav ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav}">${ic('heart', 16)}</span>
+      <span class="gc-fav${fav ? ' on' : ''}" data-fav="${id}" role="button" tabindex="0" aria-label="${fav ? 'Remove from favourites' : 'Add to favourites'}" aria-pressed="${fav}">${ic('heart', 18)}</span>
       <span class="gc-art">${g.art || g.icon}</span>
-      <span class="gc-name">${esc(g.name)}</span>
-      <span class="gc-sub"${TIMED_IDS.includes(id) ? ` data-phase="${id}"` : ''}>${TIMED_IDS.includes(id) ? 'Live rounds' : `RTP ${Number(info ? info.rtp : g.rtp).toFixed(1)}%`}</span>
+      <span class="gc-name${g.name.length > 9 ? ' long' : ''}">${esc(g.name)}</span>
+      ${timed ? `<span class="gc-sub" data-phase="${id}">Live rounds</span>` : ''}
+      <span class="gc-brand" aria-hidden="true"><small>GOLD</small><b>RUSH</b></span>
     </a>`;
   };
 
@@ -885,8 +909,7 @@
     const off = !cfg.enabled;
     const liveBadge = { cls: 'live', text: 'Live' };
     const rows = [
-      ['originals', 'Originals', order, { badge: (id) => (games[id].badge ? { cls: games[id].badge === 'NEW' ? 'new' : 'hot', text: games[id].badge } : null) }],
-      ['rounds', 'Live rounds', TIMED_IDS, { badge: () => liveBadge }],
+      ['originals', 'Originals', order, { badge: (id) => (TIMED_IDS.includes(id) ? liveBadge : games[id].badge ? { cls: games[id].badge === 'NEW' ? 'new' : 'hot', text: games[id].badge } : null) }],
       ['table', 'Table games', order.filter((id) => games[id].cat === 'table')],
       ['instant', 'Instant win', order.filter((id) => games[id].cat === 'instant')],
       ['cashout', 'Climb & cash out', order.filter((id) => games[id].cat === 'cashout')],
@@ -913,7 +936,13 @@
       <div id="gl-rows">${rowsHTML(rows)}</div>
       <div class="gl-grid" id="gl-grid" hidden></div>
       <section class="gl-sec">
-        <div class="gl-row-head"><h2>${ic('live', 18)} Latest bets</h2><span class="gl-note">Live across every game</span></div>
+        <div class="gl-row-head"><h2>${ic('live', 18)} Live bets</h2>
+          <div class="gl-feed-tabs" id="gl-feed-tabs" role="tablist" aria-label="Which bets">
+            <button type="button" role="tab" class="on" aria-selected="true" data-feed="all">All bets</button>
+            <button type="button" role="tab" aria-selected="false" data-feed="big">Big wins</button>
+            <button type="button" role="tab" aria-selected="false" data-feed="mine">My bets</button>
+          </div>
+        </div>
         <div id="gl-live" class="feed-wrap"><div class="feed-empty">Loading…</div></div>
       </section>
     </div>`);
@@ -972,20 +1001,51 @@
       }
     });
     onLeave(() => { clearInterval(feedTimer); clearInterval(roundTimer); });
+    feedView = 'all';
+    $('#gl-feed-tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-feed]');
+      if (!b || b.dataset.feed === feedView) return;
+      feedView = b.dataset.feed;
+      $$('#gl-feed-tabs [data-feed]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); });
+      $('#gl-live').innerHTML = '<div class="feed-empty">Loading…</div>';
+      paintLobbyLive();
+    });
     paintLobbyLive();
-    feedTimer = setInterval(paintLobbyLive, 6000);
+    feedTimer = setInterval(paintLobbyLive, 4000);
     paintRoundTiles();
     roundTimer = setInterval(paintRoundTiles, 1000);
   }
 
+  /* The lobby's live bets: everyone's latest, this week's biggest wins, or your own. New rows flash in. */
+  let feedView = 'all';
+  const feedSeen = new Set();
   async function paintLobbyLive() {
     const el = $('#gl-live');
     if (!el) return;
+    const view = feedView;
     try {
-      const { bets } = await GR.api('/games/live');
-      if (!$('#gl-live')) return;
-      el.innerHTML = feedTable(bets.map((b) => ({ name: games[b.game] ? games[b.game].name : b.name, icon: games[b.game] ? games[b.game].icon : '', who: b.username, color: b.avatar_color, amount: b.amount, payout: b.payout, mult: b.multiplier, status: 'settled' })),
-        ['game', 'player', 'bet', 'mult', 'payout'], 'No bets yet. Be the first.');
+      let rows;
+      if (view === 'mine') {
+        if (!me()) { el.innerHTML = '<div class="feed-empty">Log in to see your bets here.</div>'; el.dataset.view = view; return; }
+        const { bets } = await GR.api('/games/bets?limit=10');
+        rows = bets.map((b) => ({ game: b.game, name: games[b.game] ? games[b.game].name : b.name, icon: games[b.game] ? games[b.game].icon : '', who: me().username, color: me().avatar_color,
+          amount: b.amount, payout: b.payout, mult: b.multiplier, status: b.status, open: b.status === 'active', at: b.settled_at || b.created_at, mine: true }));
+      } else {
+        const { bets } = await GR.api(`/games/live?limit=10${view === 'big' ? '&view=big' : ''}`);
+        rows = bets.map((b) => ({ game: b.game, name: games[b.game] ? games[b.game].name : b.name, icon: games[b.game] ? games[b.game].icon : '', who: b.username, color: b.avatar_color,
+          amount: b.amount, payout: b.payout, mult: b.multiplier, status: 'settled', at: b.settled_at }));
+      }
+      if (!$('#gl-live') || view !== feedView) return;
+      const first = el.dataset.view !== view;
+      if (feedSeen.size > 400) feedSeen.clear();
+      for (const r of rows) {
+        const key = `${r.game}|${r.who}|${r.at}|${r.amount}`;
+        r.fresh = !first && !feedSeen.has(key);
+        feedSeen.add(key);
+      }
+      el.dataset.view = view;
+      el.innerHTML = feedTable(rows, ['game', 'player', 'time', 'bet', 'mult', 'payout'],
+        view === 'big' ? 'No big wins this week yet.' : view === 'mine' ? 'Your bets will show up here.' : 'No bets yet. Be the first.');
     } catch { /* try again soon */ }
   }
 

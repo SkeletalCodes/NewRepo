@@ -76,12 +76,18 @@ router.get('/config', async (_req, res) => {
   });
 });
 
+/* Settled bets from everyone, newest first. ?view=big lists this week's biggest wins instead. */
 router.get('/live', async (req, res) => {
   const game = GAMES[req.query.game] ? req.query.game : null;
+  const big = req.query.view === 'big';
   const p = pageOf(req.query, 15);
+  const where = ["b.status = 'settled'"];
+  const params = [];
+  if (game) { where.push('b.game = ?'); params.push(game); }
+  if (big) { where.push('b.payout > b.amount', 'b.settled_at > ?'); params.push(Date.now() - 7 * 24 * 60 * 60 * 1000); }
   const rows = await db.all(`SELECT b.game, b.amount, b.payout, b.multiplier, b.settled_at, u.username, u.avatar_color
-    FROM bets b JOIN users u ON u.id = b.user_id WHERE b.status = 'settled' ${game ? 'AND b.game = ?' : ''}
-    ORDER BY b.settled_at DESC LIMIT ? OFFSET ?`, ...(game ? [game] : []), p.limit + 1, p.offset);
+    FROM bets b JOIN users u ON u.id = b.user_id WHERE ${where.join(' AND ')}
+    ORDER BY ${big ? '(b.payout - b.amount) DESC, b.settled_at DESC' : 'b.settled_at DESC'} LIMIT ? OFFSET ?`, ...params, p.limit + 1, p.offset);
   const mask = (n) => (n.length <= 3 ? `${n[0]}**` : n.slice(0, 2) + '*'.repeat(Math.min(4, n.length - 3)) + n.slice(-1));
   res.json(pageRows(rows.map((r) => ({ ...r, name: GAMES[r.game] ? GAMES[r.game].name : r.game, username: mask(r.username) })), p, 'bets'));
 });
